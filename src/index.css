@@ -991,11 +991,10 @@ select option {
     0 4px 6px -1px rgba(0, 0, 0, 0.1),
     0 20px 50px -12px rgba(0, 0, 0, 0.6),
     inset 0 1px 1px rgba(255, 255, 255, 0.1);
-  width: 300px;
+  width: min(300px, 90vw);
   display: flex;
   flex-direction: column;
-  overflow: visible;
-  max-height: 450px;
+  max-height: calc(100vh - 40px);
   transform-origin: center bottom;
   will-change: transform, opacity, width, height;
   overflow: hidden;
@@ -1006,11 +1005,11 @@ select option {
   display: flex;
   flex-direction: column;
   height: auto;
-  max-height: 450px;
+  max-height: calc(100vh - 40px);
 }
 
 .ai-tooltip.wide .tooltip-inner-measure {
-  max-height: 500px;
+  max-height: calc(100vh - 40px);
 }
 
 @keyframes tooltipIntro {
@@ -1039,8 +1038,8 @@ select option {
 }
 
 .ai-tooltip.wide {
-  width: 450px;
-  max-height: 500px;
+  width: min(450px, 95vw);
+  max-height: calc(100vh - 40px);
 }
 
 .ai-tooltip.loading-state {

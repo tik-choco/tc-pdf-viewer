@@ -41,12 +41,27 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
 
   useEffect(() => {
     if (tooltipRef.current && position && !isDragging && !hasDragged) {
-      const rect = tooltipRef.current.getBoundingClientRect();
-      let x = position.x + 15;
-      let y = position.y + 15;
-      if (x + rect.width > window.innerWidth) x = Math.max(10, position.x - rect.width - 20);
-      if (y + rect.height > window.innerHeight) y = Math.max(10, position.y - rect.height - 20);
-      setOffset({ x: x - position.x, y: y - position.y });
+      const toolRect = tooltipRef.current.getBoundingClientRect();
+      const targetRect = position; // Now a full selection rect
+      
+      // Calculate best position
+      // Prefer: Top center
+      let preferredX = targetRect.left + (targetRect.width / 2) - (toolRect.width / 2);
+      let preferredY = targetRect.top - toolRect.height - 15; // Above the selection
+      
+      // If it doesn't fit at the top, try bottom
+      if (preferredY < 10) {
+        preferredY = targetRect.bottom + 15; // Below the selection
+      }
+      
+      // Keep within viewport
+      preferredX = Math.max(10, Math.min(preferredX, window.innerWidth - toolRect.width - 10));
+      preferredY = Math.max(10, Math.min(preferredY, window.innerHeight - toolRect.height - 10));
+      
+      setOffset({ 
+        x: preferredX - targetRect.left, 
+        y: preferredY - targetRect.top 
+      });
     }
   }, [position, isVisible, text, currentTerm, htmlContent, isDragging, hasDragged]);
 

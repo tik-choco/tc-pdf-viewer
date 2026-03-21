@@ -39,10 +39,7 @@ export default function PdfViewer({ pdfData, onHoverText }) {
                 const range = selection.getRangeAt(0);
                 const rect = range.getBoundingClientRect();
                 if (rect.top > 0 && rect.left > 0) {
-                    onHoverText(text, { 
-                        x: rect.left + rect.width / 2, 
-                        y: rect.top - 10 
-                    });
+                    onHoverText(text, rect);
                 }
             }
         }, 50);
