@@ -98,19 +98,6 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
             <div className="sidebar-content">
                 {view === 'files' ? (
                     <div className="file-section">
-                        <div className="file-top-bar">
-                            <button className="new-folder-top-btn" onClick={() => setIsAddingFolder(true)} style={{ flex: 1 }}>
-                                <FolderPlus size={14} /> <span>新規フォルダ</span>
-                            </button>
-                        </div>
-
-                        {isAddingFolder && (
-                            <div className="inline-add-folder">
-                                <input className="folder-name-input" placeholder="名前..." value={newFolderName} onInput={e => setNewFolderName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddFolder(); if (e.key === 'Escape') setIsAddingFolder(false); }} autoFocus />
-                                <button onClick={handleAddFolder}><Check size={14} /></button>
-                            </div>
-                        )}
-
                         <div className="folder-list">
                             {allFolders.map(folder => (
                                 <div
@@ -254,6 +241,19 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                 </div>
                             ))}
                         </div>
+
+                        <div className="file-bottom-bar">
+                            <button className="new-folder-top-btn" onClick={() => setIsAddingFolder(true)} style={{ width: '100%' }}>
+                                <FolderPlus size={14} /> <span>新規フォルダ</span>
+                            </button>
+                        </div>
+
+                        {isAddingFolder && (
+                            <div className="inline-add-folder">
+                                <input className="folder-name-input" placeholder="名前..." value={newFolderName} onInput={e => setNewFolderName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddFolder(); if (e.key === 'Escape') setIsAddingFolder(false); }} autoFocus />
+                                <button onClick={handleAddFolder}><Check size={14} /></button>
+                            </div>
+                        )}
                     </div>
                 ) : (
                     <div className="settings-section">

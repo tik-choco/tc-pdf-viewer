@@ -127,10 +127,16 @@ select option {
   text-decoration: underline;
 }
 
-.file-top-bar {
+.file-top-bar,
+.file-bottom-bar {
   display: flex;
   gap: 8px;
   margin-bottom: 12px;
+}
+
+.file-bottom-bar {
+  margin-top: 12px;
+  margin-bottom: 0;
 }
 
 .sort-btn,
