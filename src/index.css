@@ -547,7 +547,7 @@ select option {
   z-index: 1000;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 2.0s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .pdf-mask.active {
