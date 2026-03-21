@@ -126,7 +126,24 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                         
                         <div className="folder-list">
                             {allFolders.map(folder => (
-                                <div key={folder} className="folder-group">
+                                <div 
+                                    key={folder} 
+                                    className="folder-group"
+                                    onDragEnter={e => e.preventDefault()}
+                                    onDragOver={e => {
+                                        e.preventDefault();
+                                        e.dataTransfer.dropEffect = 'move';
+                                    }}
+                                    onDrop={async e => {
+                                        e.preventDefault();
+                                        const fileName = e.dataTransfer.getData('fileName') || e.dataTransfer.getData('text/plain');
+                                        if (fileName) {
+                                            const newFolderName = folder === 'Default' ? 'Default' : folder;
+                                            await updatePdfFolder(fileName, newFolderName);
+                                            await loadFiles();
+                                        }
+                                    }}
+                                >
                                     <div className="folder-header">
                                         <div className="folder-info" onClick={() => toggleFolder(folder)}>
                                             {expandedFolders.includes(folder) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -140,7 +157,26 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                 <input type="file" accept="application/pdf" onChange={e => handleUpload(e, folder)} hidden />
                                             </label>
                                             {folder !== 'Default' && (
-                                                <button className="icon-action-btn delete" title="フォルダ削除" onClick={() => { if(confirm(`「${folder}」を削除しますか？`)){ setCustomFolders(f=>f.filter(x=>x!==folder)); localStorage.setItem('mist_custom_folders', JSON.stringify(customFolders.filter(x=>x!==folder))); } }}>
+                                                <button 
+                                                    className="icon-action-btn delete" 
+                                                    title="フォルダ削除" 
+                                                    onClick={async (e) => { 
+                                                        e.stopPropagation();
+                                                        if(confirm(`「${folder}」を削除しますか？\n（中のファイルはDefaultに移動します）`)){ 
+                                                            setCustomFolders(f => f.filter(x => x !== folder)); 
+                                                            localStorage.setItem('mist_custom_folders', JSON.stringify(customFolders.filter(x => x !== folder))); 
+                                                            
+                                                            let changed = false;
+                                                            for (const p of pdfs) {
+                                                                if (p.folder === folder) {
+                                                                    await updatePdfFolder(p.name, '');
+                                                                    changed = true;
+                                                                }
+                                                            }
+                                                            if (changed) await loadFiles();
+                                                        } 
+                                                    }}
+                                                >
                                                     <Trash2 size={12} />
                                                 </button>
                                             )}
@@ -149,7 +185,16 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                     {expandedFolders.includes(folder) && (
                                         <ul className="file-list">
                                             {sortedPdfs.filter(p => (p.folder || 'Default') === folder).map(file => (
-                                                <li key={file.name} className={currentPdfName === file.name ? 'active' : ''} draggable onDragStart={e => e.dataTransfer.setData('fileName', file.name)}>
+                                                <li 
+                                                    key={file.name} 
+                                                    className={currentPdfName === file.name ? 'active' : ''} 
+                                                    draggable 
+                                                    onDragStart={e => {
+                                                        e.dataTransfer.setData('fileName', file.name);
+                                                        e.dataTransfer.setData('text/plain', file.name);
+                                                        e.dataTransfer.effectAllowed = 'move';
+                                                    }}
+                                                >
                                                     <div className="file-item-main" onClick={() => onSelectPdf(file.name)}>
                                                         {editingFile === file.name ? (
                                                             <input className="rename-input" value={newName} onInput={e => setNewName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleRename(file.name); if (e.key === 'Escape') setEditingFile(null); }} onBlur={() => handleRename(file.name)} autoFocus />
@@ -164,9 +209,9 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                             </button>
                                                             {activeMenu?.id === file.name && (
                                                                 <div className="file-dropdown">
-                                                                    <button className="menu-item" onClick={() => { setEditingFile(file.name); setNewName(file.name); setActiveMenu(null); }}><Edit3 size={14} /> リネーム</button>
-                                                                    <button className="menu-item" onClick={() => { loadPdf(file.name).then(d=>{const b=new Blob([d],{type:'application/pdf'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=file.name;a.click();}); setActiveMenu(null); }}><Download size={14} /> ダウンロード</button>
-                                                                    <button className="menu-item delete" onClick={() => { handleDelete(file.name); setActiveMenu(null); }}><Trash2 size={14} /> 削除</button>
+                                                                    <button className="menu-item" onClick={(e) => { e.stopPropagation(); setEditingFile(file.name); setNewName(file.name); setActiveMenu(null); }}><Edit3 size={14} /> リネーム</button>
+                                                                    <button className="menu-item" onClick={(e) => { e.stopPropagation(); loadPdf(file.name).then(d=>{const b=new Blob([d],{type:'application/pdf'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=file.name;a.click();}); setActiveMenu(null); }}><Download size={14} /> ダウンロード</button>
+                                                                    <button className="menu-item delete" onClick={(e) => { e.stopPropagation(); handleDelete(file.name); setActiveMenu(null); }}><Trash2 size={14} /> 削除</button>
                                                                 </div>
                                                             )}
                                                         </div>
