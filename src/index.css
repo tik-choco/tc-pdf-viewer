@@ -784,6 +784,54 @@ select option {
   color: var(--primary);
 }
 
+.msg-bubble-wrapper {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.chat-message.user .msg-bubble-wrapper {
+  width: auto;
+  max-width: 100%;
+}
+
+.msg-copy-container {
+  position: sticky;
+  top: 8px;
+  height: 0;
+  width: 100%;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.msg-copy-btn {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  pointer-events: auto;
+  background: rgba(15, 23, 42, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.msg-bubble-wrapper:hover .msg-copy-btn {
+  opacity: 1;
+}
+
+.msg-copy-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
 .msg-bubble {
   background: rgba(255, 255, 255, 0.05);
   padding: 12px 16px;
@@ -799,13 +847,13 @@ select option {
   background: var(--primary);
   color: white;
   width: auto;
-  max-width: 90%;
-  border-top-right-radius: 2px;
+  word-break: normal;
+  overflow-wrap: break-word;
+  line-break: strict;
 }
 
 .chat-message.assistant .msg-bubble {
   border: 1px solid rgba(255, 255, 255, 0.05);
-  border-top-left-radius: 2px;
 }
 
 .clear-chat-btn {
@@ -1160,8 +1208,9 @@ select option {
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 8px 12px;
   text-align: left;
-  word-break: normal;
-  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  line-break: strict;
 }
 
 .markdown-body td:first-child,

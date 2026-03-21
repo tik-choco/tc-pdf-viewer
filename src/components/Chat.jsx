@@ -1,9 +1,46 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
-import { Send, Trash2, User, Bot, Loader2 } from 'lucide-preact';
+import { Send, Trash2, User, Bot, Loader2, Copy, Check } from 'lucide-preact';
 import { chatAi } from '../services/ai';
 import { Marked } from 'marked';
 
 const marked = new Marked();
+
+const MessageItem = ({ m }) => {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = () => {
+        navigator.clipboard.writeText(m.content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+    };
+
+    return (
+        <div className={`chat-message ${m.role}`}>
+            {m.role === 'assistant' && (
+                <div className="msg-icon">
+                    <Bot size={14} />
+                </div>
+            )}
+            <div className="msg-bubble-wrapper">
+                {m.role === 'assistant' && (
+                    <div className="msg-copy-container">
+                        <button
+                            className="msg-copy-btn"
+                            onClick={handleCopy}
+                            title="コピー"
+                        >
+                            {copied ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+                        </button>
+                    </div>
+                )}
+                <div
+                    className="msg-bubble markdown-body"
+                    dangerouslySetInnerHTML={{ __html: marked.parse(m.content) }}
+                />
+            </div>
+        </div>
+    );
+};
 
 export default function Chat({ lastExplainedText, currentPdfName, pdfContent, onResizerMouseDown, isResizing }) {
     const [messages, setMessages] = useState([]);
@@ -91,19 +128,38 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, on
                 )}
                 {messages.map((m, idx) => (
                     <div key={idx} className={`chat-message ${m.role}`}>
-                        <div className="msg-icon">
-                            {m.role === 'user' ? <User size={14} /> : <Bot size={14} />}
+                        {m.role === 'assistant' && (
+                            <div className="msg-icon">
+                                <Bot size={24} />
+                            </div>
+                        )}
+                        <div className="msg-bubble-wrapper">
+                            {m.role === 'assistant' && (
+                                <div className="msg-copy-container">
+                                    <button
+                                        className="msg-copy-btn"
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(m.content);
+                                        }}
+                                        title="コピー"
+                                    >
+                                        <Copy size={12} />
+                                    </button>
+                                </div>
+                            )}
+                            <div
+                                className="msg-bubble markdown-body"
+                                dangerouslySetInnerHTML={{ __html: marked.parse(m.content) }}
+                            />
                         </div>
-                        <div
-                            className="msg-bubble markdown-body"
-                            dangerouslySetInnerHTML={{ __html: marked.parse(m.content) }}
-                        />
                     </div>
                 ))}
                 {isLoading && (
                     <div className="chat-message assistant loading">
                         <div className="msg-icon"><Loader2 className="spinning" size={14} /></div>
-                        <div className="msg-bubble">思考中...</div>
+                        <div className="msg-bubble-wrapper">
+                            <div className="msg-bubble">思考中...</div>
+                        </div>
                     </div>
                 )}
             </div>
