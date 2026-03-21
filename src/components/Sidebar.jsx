@@ -89,7 +89,7 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
     return (
         <div className="sidebar">
             <div className="sidebar-header">
-                <h1>PDF Explainer</h1>
+                <h1>PDF Viewer</h1>
                 <div className="nav-icons">
                     <button className={view === 'files' ? 'active' : ''} onClick={() => setView('files')}><List size={16} /></button>
                     <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}><Settings size={16} /></button>

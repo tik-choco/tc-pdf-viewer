@@ -10,9 +10,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
       manifest: {
-        name: 'Web PDF Explainer',
-        short_name: 'PDF Explainer',
-        description: 'Hover to explain PDF content using AI',
+        name: 'Web PDF Viewer',
+        short_name: 'PDF Viewer',
+        description: 'AI-powered PDF viewer using mistlib storage',
         theme_color: '#0f172a',
         icons: [
           {
