@@ -123,7 +123,7 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, on
                 {messages.length === 0 && (
                     <div className="chat-welcome">
                         <Bot size={32} />
-                        <p>ドキュメントについて質問してください。<br />ホバー中のテキストについても深掘りできます。</p>
+                        <p>ドキュメントについて質問できます！</p>
                     </div>
                 )}
                 {messages.map((m, idx) => (

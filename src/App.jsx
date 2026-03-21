@@ -196,7 +196,7 @@ export function App() {
                 />
               ) : (
                 <div className="file-name-display" onClick={() => { setIsRenaming(true); setRenameValue(currentPdfName); }} title="クリックして名前を変更">
-                  ファイル: <span className="editable-name">{currentPdfName}</span>
+                  <span className="editable-name">{currentPdfName}</span>
                 </div>
               )
             )}
@@ -211,10 +211,10 @@ export function App() {
                 setIsPdfMasking(false);
               }, 600);
             }}
-            title="AIチャット"
+            title="AI Chat"
           >
             <MessageCircle size={18} />
-            <span className="chat-toggle-text">AIチャット</span>
+            <span className="chat-toggle-text">AI Chat</span>
           </button>
         </header>
 

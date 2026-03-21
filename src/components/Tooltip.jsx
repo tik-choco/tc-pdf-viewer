@@ -43,24 +43,24 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
     if (tooltipRef.current && position && !isDragging && !hasDragged) {
       const toolRect = tooltipRef.current.getBoundingClientRect();
       const targetRect = position; // Now a full selection rect
-      
+
       // Calculate best position
       // Prefer: Top center
       let preferredX = targetRect.left + (targetRect.width / 2) - (toolRect.width / 2);
       let preferredY = targetRect.top - toolRect.height - 15; // Above the selection
-      
+
       // If it doesn't fit at the top, try bottom
       if (preferredY < 10) {
         preferredY = targetRect.bottom + 15; // Below the selection
       }
-      
+
       // Keep within viewport
       preferredX = Math.max(10, Math.min(preferredX, window.innerWidth - toolRect.width - 10));
       preferredY = Math.max(10, Math.min(preferredY, window.innerHeight - toolRect.height - 10));
-      
-      setOffset({ 
-        x: preferredX - targetRect.left, 
-        y: preferredY - targetRect.top 
+
+      setOffset({
+        x: preferredX - targetRect.left,
+        y: preferredY - targetRect.top
       });
     }
   }, [position, isVisible, text, currentTerm, htmlContent, isDragging, hasDragged]);
@@ -89,7 +89,7 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
   const handleMouseDown = (e) => {
     if (e.button !== 0) return;
     if (e.target.closest('button') || e.target.closest('.lang-menu')) return;
-    
+
     e.stopPropagation();
     setIsDragging(true);
   };
@@ -158,77 +158,77 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
     >
       <div ref={measureRef} className="tooltip-inner-measure">
         <div className="tooltip-header" onMouseDown={handleMouseDown}>
-        <div className="header-left">
-           <span className="ai-label">{text === 'loading' ? '処理中...' : text ? 'AI 結果' : '選択中の用語'}</span>
-        </div>
-        <div className="header-actions">
-          {text && text !== 'loading' && (
-            <button className="icon-action-btn" onClick={handleCopy} title="結果をコピー">
-              {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
-            </button>
-          )}
-          <button onClick={onClose} className="icon-action-btn close"><X size={14} /></button>
-        </div>
-      </div>
-      
-      <div className="tooltip-content">
-        {text === 'loading' ? (
-          <div className="loading-spinner">
-            <div className="spinner"></div>
-            <span>解析中...</span>
+          <div className="header-left">
+            <span className="ai-label">{text === 'loading' ? '処理中...' : text ? 'AI 結果' : '選択中の文章'}</span>
           </div>
-        ) : text ? (
-          <div className="tooltip-scroll-area">
-            <div className="explanation-text markdown-body" dangerouslySetInnerHTML={{ __html: htmlContent }} />
-          </div>
-        ) : (
-          <div className="tooltip-idle">
-            <div className="term-display">
-                <strong>{currentTerm}</strong>
-            </div>
-            <div className="tooltip-actions">
-              <button onClick={onRequestExplanation} className="explain-action-btn">
-                <Sparkles size={14} /> AI で解説
+          <div className="header-actions">
+            {text && text !== 'loading' && (
+              <button className="icon-action-btn" onClick={handleCopy} title="結果をコピー">
+                {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
               </button>
-              
-              <div className="lang-split-container">
-                <button 
-                  className="lang-main-btn"
-                  onClick={() => onRequestTranslation(lastLang)}
-                  title={`${lastLang}で翻訳`}
-                >
-                  <Languages size={14} /> {lastLang}
+            )}
+            <button onClick={onClose} className="icon-action-btn close"><X size={14} /></button>
+          </div>
+        </div>
+
+        <div className="tooltip-content">
+          {text === 'loading' ? (
+            <div className="loading-spinner">
+              <div className="spinner"></div>
+              <span>解析中...</span>
+            </div>
+          ) : text ? (
+            <div className="tooltip-scroll-area">
+              <div className="explanation-text markdown-body" dangerouslySetInnerHTML={{ __html: htmlContent }} />
+            </div>
+          ) : (
+            <div className="tooltip-idle">
+              <div className="term-display">
+                <strong>{currentTerm}</strong>
+              </div>
+              <div className="tooltip-actions">
+                <button onClick={onRequestExplanation} className="explain-action-btn">
+                  <Sparkles size={14} /> AI で解説
                 </button>
-                <button 
-                  className={`lang-toggle-btn ${showLangs ? 'active' : ''}`}
-                  onClick={() => setShowLangs(!showLangs)}
-                  title="言語を切り替え"
-                >
-                  <ChevronDown size={14} />
-                </button>
-                
-                {showLangs && (
-                  <div className="lang-menu">
-                    {targetLanguages.map(lang => (
-                      <button 
-                        key={lang} 
-                        className="lang-item"
-                        onClick={() => {
-                          onSwitchLanguage(lang);
-                          setShowLangs(false);
-                        }}
-                      >
-                        {lang}
-                      </button>
-                    ))}
-                  </div>
-                )}
+
+                <div className="lang-split-container">
+                  <button
+                    className="lang-main-btn"
+                    onClick={() => onRequestTranslation(lastLang)}
+                    title={`${lastLang}で翻訳`}
+                  >
+                    <Languages size={14} /> {lastLang}
+                  </button>
+                  <button
+                    className={`lang-toggle-btn ${showLangs ? 'active' : ''}`}
+                    onClick={() => setShowLangs(!showLangs)}
+                    title="言語を切り替え"
+                  >
+                    <ChevronDown size={14} />
+                  </button>
+
+                  {showLangs && (
+                    <div className="lang-menu">
+                      {targetLanguages.map(lang => (
+                        <button
+                          key={lang}
+                          className="lang-item"
+                          onClick={() => {
+                            onSwitchLanguage(lang);
+                            setShowLangs(false);
+                          }}
+                        >
+                          {lang}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
-  </div>
-);
+  );
 }
