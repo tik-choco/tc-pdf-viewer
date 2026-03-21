@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
 import { Settings, FileUp, List, Save, RefreshCw, Folder, Download, Edit3, Trash2, ChevronRight, ChevronDown, Plus, FolderPlus, Move, Check, X, MoreVertical } from 'lucide-preact';
-import { getAiSettings, saveAiSettings, getAvailableModels } from '../services/ai';
+import { getAiSettings, saveAiSettings, getAvailableModels, DEFAULT_MODELS } from '../services/ai';
 import { getPdfList, savePdf, renamePdf, deletePdf, updatePdfFolder, loadPdf, updatePdfList } from '../services/storage';
 
 export default function Sidebar({ onSelectPdf, currentPdfName }) {
@@ -8,7 +8,7 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
     const [pdfs, setPdfs] = useState([]);
     const [settings, setSettings] = useState(getAiSettings());
     const [isUploading, setIsUploading] = useState(false);
-    const [availableModels, setAvailableModels] = useState([]);
+    const [availableModels, setAvailableModels] = useState(DEFAULT_MODELS);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
     const [expandedFolders, setExpandedFolders] = useState(['Default']);
     const [editingFile, setEditingFile] = useState(null);
@@ -17,7 +17,14 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
     const [newFolderName, setNewFolderName] = useState('');
     const [customFolders, setCustomFolders] = useState(['Default']);
     const [activeMenu, setActiveMenu] = useState(null);
+    const [showManual, setShowManual] = useState({});
     const menuRef = useRef(null);
+
+    useEffect(() => {
+        if (view === 'settings') {
+            fetchModels();
+        }
+    }, [view]);
 
     useEffect(() => {
         loadFiles();
@@ -278,37 +285,72 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                 { key: 'explain', label: 'AI解説' },
                                 { key: 'translate', label: 'AI翻訳' },
                                 { key: 'chat', label: 'チャット' }
-                            ].map(task => (
-                                <div key={task.key} className="task-model-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', width: '50px' }}>{task.label}</span>
-                                    {availableModels.length > 0 ? (
+                            ].map(task => {
+                                const currentModel = settings.models?.[task.key] || '';
+                                // Determine if we should show manual input
+                                // 1. User clicked "Manual Input"
+                                // 2. Current model is not in available list and not empty
+                                const isManual = showManual[task.key] || (currentModel && !availableModels.includes(currentModel) && !DEFAULT_MODELS.includes(currentModel));
+
+                                if (isManual) {
+                                    return (
+                                        <div key={task.key} className="task-model-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', width: '50px' }}>{task.label}</span>
+                                            <input
+                                                style={{ flex: 1 }}
+                                                type="text"
+                                                value={currentModel}
+                                                onInput={e => setSettings({
+                                                    ...settings,
+                                                    models: { ...settings.models, [task.key]: e.target.value }
+                                                })}
+                                                placeholder="モデル名を入力..."
+                                                autoFocus
+                                            />
+                                            <button 
+                                                className="refresh-btn" 
+                                                onClick={() => setShowManual({ ...showManual, [task.key]: false })}
+                                                title="リストから選択"
+                                                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 4 }}
+                                            >
+                                                <List size={14} />
+                                            </button>
+                                        </div>
+                                    );
+                                }
+
+                                const modelOptions = Array.from(new Set([
+                                    ...DEFAULT_MODELS,
+                                    ...availableModels,
+                                    ...(currentModel ? [currentModel] : [])
+                                ])).sort();
+
+                                return (
+                                    <div key={task.key} className="task-model-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', width: '50px' }}>{task.label}</span>
                                         <select
                                             style={{ flex: 1 }}
-                                            value={settings.models?.[task.key] || ''}
-                                            onChange={e => setSettings({
-                                                ...settings,
-                                                models: { ...settings.models, [task.key]: e.target.value }
-                                            })}
+                                            value={currentModel}
+                                            onChange={e => {
+                                                if (e.target.value === '__custom__') {
+                                                    setShowManual({ ...showManual, [task.key]: true });
+                                                } else {
+                                                    setSettings({
+                                                        ...settings,
+                                                        models: { ...settings.models, [task.key]: e.target.value }
+                                                    });
+                                                }
+                                            }}
                                         >
                                             <option value="">(選択...)</option>
-                                            {availableModels.map(m => (
+                                            {modelOptions.map(m => (
                                                 <option key={m} value={m}>{m}</option>
                                             ))}
+                                            <option value="__custom__">+ 手動入力...</option>
                                         </select>
-                                    ) : (
-                                        <input
-                                            style={{ flex: 1 }}
-                                            type="text"
-                                            value={settings.models?.[task.key] || ''}
-                                            onInput={e => setSettings({
-                                                ...settings,
-                                                models: { ...settings.models, [task.key]: e.target.value }
-                                            })}
-                                            placeholder="gpt-4o..."
-                                        />
-                                    )}
-                                </div>
-                            ))}
+                                    </div>
+                                );
+                            })}
                         </div>
                         <button className="save-btn" onClick={handleSaveSettings}><Save size={14} /> 設定を保存</button>
                     </div>

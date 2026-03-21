@@ -1,5 +1,12 @@
 import { getExplanation, saveExplanation } from './storage';
 
+export const DEFAULT_MODELS = [
+    'gpt-4o',
+    'gpt-4o-mini',
+    'gpt-4-turbo',
+    'gpt-3.5-turbo'
+];
+
 const DEFAULT_SETTINGS = {
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
