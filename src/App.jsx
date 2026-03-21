@@ -60,6 +60,7 @@ export function App() {
   const handleSelectPdf = async (name) => {
     setCurrentPdfName(name);
     setPdfContent('');
+    localStorage.setItem('mist_last_pdf', name);
     try {
       const data = await loadPdf(name);
       if (data) {
@@ -75,6 +76,13 @@ export function App() {
       alert('エラーが発生しました: ' + err.message);
     }
   };
+
+  useEffect(() => {
+    const savedPdf = localStorage.getItem('mist_last_pdf');
+    if (savedPdf) {
+      handleSelectPdf(savedPdf);
+    }
+  }, []);
 
   const handleHoverText = useCallback((text, pos) => {
     setTooltipPos(pos);

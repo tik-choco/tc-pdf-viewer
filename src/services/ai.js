@@ -83,8 +83,7 @@ export async function chatAi(messages, task = 'chat') {
             },
             body: JSON.stringify({
                 model: model,
-                messages: messages,
-                max_tokens: 1000
+                messages: messages
             })
         });
 

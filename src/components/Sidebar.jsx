@@ -123,11 +123,11 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                 <button onClick={handleAddFolder}><Check size={14} /></button>
                             </div>
                         )}
-                        
+
                         <div className="folder-list">
                             {allFolders.map(folder => (
-                                <div 
-                                    key={folder} 
+                                <div
+                                    key={folder}
                                     className="folder-group"
                                     onDragEnter={e => e.preventDefault()}
                                     onDragOver={e => {
@@ -157,15 +157,15 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                 <input type="file" accept="application/pdf" onChange={e => handleUpload(e, folder)} hidden />
                                             </label>
                                             {folder !== 'Default' && (
-                                                <button 
-                                                    className="icon-action-btn delete" 
-                                                    title="フォルダ削除" 
-                                                    onClick={async (e) => { 
+                                                <button
+                                                    className="icon-action-btn delete"
+                                                    title="フォルダ削除"
+                                                    onClick={async (e) => {
                                                         e.stopPropagation();
-                                                        if(confirm(`「${folder}」を削除しますか？\n（中のファイルはDefaultに移動します）`)){ 
-                                                            setCustomFolders(f => f.filter(x => x !== folder)); 
-                                                            localStorage.setItem('mist_custom_folders', JSON.stringify(customFolders.filter(x => x !== folder))); 
-                                                            
+                                                        if (confirm(`「${folder}」を削除しますか？\n（中のファイルはDefaultに移動します）`)) {
+                                                            setCustomFolders(f => f.filter(x => x !== folder));
+                                                            localStorage.setItem('mist_custom_folders', JSON.stringify(customFolders.filter(x => x !== folder)));
+
                                                             let changed = false;
                                                             for (const p of pdfs) {
                                                                 if (p.folder === folder) {
@@ -174,7 +174,7 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                                 }
                                                             }
                                                             if (changed) await loadFiles();
-                                                        } 
+                                                        }
                                                     }}
                                                 >
                                                     <Trash2 size={12} />
@@ -185,10 +185,10 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                     {expandedFolders.includes(folder) && (
                                         <ul className="file-list">
                                             {sortedPdfs.filter(p => (p.folder || 'Default') === folder).map(file => (
-                                                <li 
-                                                    key={file.name} 
-                                                    className={currentPdfName === file.name ? 'active' : ''} 
-                                                    draggable 
+                                                <li
+                                                    key={file.name}
+                                                    className={currentPdfName === file.name ? 'active' : ''}
+                                                    draggable
                                                     onDragStart={e => {
                                                         e.dataTransfer.setData('fileName', file.name);
                                                         e.dataTransfer.setData('text/plain', file.name);
@@ -204,13 +204,13 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                     </div>
                                                     <div className="file-actions">
                                                         <div className="dropdown-container" ref={activeMenu?.id === file.name ? menuRef : null}>
-                                                            <button className="file-menu-btn" onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu?.id === file.name ? null : { id:file.name }); }}>
+                                                            <button className="file-menu-btn" onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu?.id === file.name ? null : { id: file.name }); }}>
                                                                 <MoreVertical size={14} />
                                                             </button>
                                                             {activeMenu?.id === file.name && (
                                                                 <div className="file-dropdown">
-                                                                    <button className="menu-item" onClick={(e) => { e.stopPropagation(); setEditingFile(file.name); setNewName(file.name); setActiveMenu(null); }}><Edit3 size={14} /> リネーム</button>
-                                                                    <button className="menu-item" onClick={(e) => { e.stopPropagation(); loadPdf(file.name).then(d=>{const b=new Blob([d],{type:'application/pdf'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=file.name;a.click();}); setActiveMenu(null); }}><Download size={14} /> ダウンロード</button>
+                                                                    <button className="menu-item" onClick={(e) => { e.stopPropagation(); setEditingFile(file.name); setNewName(file.name); setActiveMenu(null); }}><Edit3 size={14} /> 名前変更</button>
+                                                                    <button className="menu-item" onClick={(e) => { e.stopPropagation(); loadPdf(file.name).then(d => { const b = new Blob([d], { type: 'application/pdf' }); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = file.name; a.click(); }); setActiveMenu(null); }}><Download size={14} /> ダウンロード</button>
                                                                     <button className="menu-item delete" onClick={(e) => { e.stopPropagation(); handleDelete(file.name); setActiveMenu(null); }}><Trash2 size={14} /> 削除</button>
                                                                 </div>
                                                             )}
@@ -229,33 +229,33 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                         <h3>AI 設定</h3>
                         <div className="form-group">
                             <label>Base URL</label>
-                            <input value={settings.baseUrl} onInput={e => setSettings({...settings, baseUrl: e.target.value})} placeholder="https://..." />
+                            <input value={settings.baseUrl} onInput={e => setSettings({ ...settings, baseUrl: e.target.value })} placeholder="https://..." />
                         </div>
                         <div className="form-group">
                             <label>API Key</label>
-                            <input type="password" value={settings.apiKey} onInput={e => setSettings({...settings, apiKey: e.target.value})} placeholder="sk-..." />
+                            <input type="password" value={settings.apiKey} onInput={e => setSettings({ ...settings, apiKey: e.target.value })} placeholder="sk-..." />
                         </div>
                         <div className="form-group">
-                            <div className="model-header" style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px'}}>
+                            <div className="model-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                                 <label>モデル設定</label>
                                 <button className="refresh-btn" onClick={fetchModels} disabled={isLoadingModels}>
                                     <RefreshCw size={12} className={isLoadingModels ? 'spinning' : ''} />
                                 </button>
                             </div>
-                            
+
                             {[
                                 { key: 'explain', label: 'AI解説' },
                                 { key: 'translate', label: 'AI翻訳' },
                                 { key: 'chat', label: 'チャット' }
                             ].map(task => (
-                                <div key={task.key} className="task-model-item" style={{display:'flex', alignItems:'center', gap: '8px', marginBottom: '4px'}}>
-                                    <span style={{fontSize:'0.7rem', color:'var(--text-muted)', width:'50px'}}>{task.label}</span>
+                                <div key={task.key} className="task-model-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                    <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', width: '50px' }}>{task.label}</span>
                                     {availableModels.length > 0 ? (
-                                        <select 
-                                            style={{flex:1}}
-                                            value={settings.models?.[task.key] || ''} 
+                                        <select
+                                            style={{ flex: 1 }}
+                                            value={settings.models?.[task.key] || ''}
                                             onChange={e => setSettings({
-                                                ...settings, 
+                                                ...settings,
                                                 models: { ...settings.models, [task.key]: e.target.value }
                                             })}
                                         >
@@ -265,14 +265,14 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                             ))}
                                         </select>
                                     ) : (
-                                        <input 
-                                            style={{flex:1}}
-                                            type="text" 
-                                            value={settings.models?.[task.key] || ''} 
+                                        <input
+                                            style={{ flex: 1 }}
+                                            type="text"
+                                            value={settings.models?.[task.key] || ''}
                                             onInput={e => setSettings({
-                                                ...settings, 
+                                                ...settings,
                                                 models: { ...settings.models, [task.key]: e.target.value }
-                                            })} 
+                                            })}
                                             placeholder="gpt-4o..."
                                         />
                                     )}
