@@ -31,7 +31,7 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
   }, [text]);
 
   useEffect(() => {
-    if (!isVisible) {
+    if (isVisible) {
       setDragOffset({ x: 0, y: 0 });
       setHasDragged(false);
     }
@@ -121,7 +121,9 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
           opacity 0.3s ${smoothEasing},
           transform 0.4s ${smoothEasing},
           width 0.3s ${smoothEasing},
-          height 0.3s ${smoothEasing}
+          height 0.3s ${smoothEasing},
+          left 0.3s ${smoothEasing},
+          top 0.3s ${smoothEasing}
         `.trim()
       }}
     >
