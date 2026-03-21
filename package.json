@@ -1,0 +1,25 @@
+{
+  "name": "pdf-explainer",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@react-pdf-viewer/core": "^3.12.0",
+    "@react-pdf-viewer/highlight": "^3.12.0",
+    "@react-pdf-viewer/zoom": "^3.12.0",
+    "lucide-preact": "^0.577.0",
+    "marked": "^17.0.5",
+    "pdfjs-dist": "^3.4.120",
+    "preact": "^10.29.0",
+    "vite-plugin-pwa": "^1.2.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.4",
+    "vite": "^6.4.1"
+  }
+}
