@@ -537,6 +537,25 @@ select option {
   width: 100%;
 }
 
+.pdf-mask {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-dark);
+  z-index: 1000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.8s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.pdf-mask.active {
+  opacity: 1;
+  pointer-events: all;
+  transition: none;
+}
+
 .pdf-viewer-container.empty-state {
   align-items: center;
   justify-content: center;

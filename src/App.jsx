@@ -14,11 +14,12 @@ export function App() {
   const [pdfContent, setPdfContent] = useState('');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [chatOpen, setChatOpen] = useState(false);
-  
+
   const [sidebarWidth, setSidebarWidth] = useState(320);
   const [chatWidth, setChatWidth] = useState(350);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isResizingChat, setIsResizingChat] = useState(false);
+  const [isPdfMasking, setIsPdfMasking] = useState(false);
 
   const [tooltipText, setTooltipText] = useState(null);
   const [lastHoverText, setLastHoverText] = useState(null);
@@ -58,6 +59,7 @@ export function App() {
   }, [isResizingSidebar, isResizingChat]);
 
   const handleSelectPdf = async (name) => {
+    setIsPdfMasking(true);
     setCurrentPdfName(name);
     setPdfContent('');
     localStorage.setItem('mist_last_pdf', name);
@@ -74,6 +76,10 @@ export function App() {
     } catch (err) {
       console.error(err);
       alert('エラーが発生しました: ' + err.message);
+    } finally {
+      setTimeout(() => {
+        setIsPdfMasking(false);
+      }, 0);
     }
   };
 
@@ -125,7 +131,7 @@ export function App() {
   };
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className={`app-container ${sidebarOpen ? 'sidebar-pg-open' : 'sidebar-pg-closed'} ${chatOpen ? 'chat-pg-open' : 'chat-pg-closed'}`}
       style={{
@@ -133,33 +139,45 @@ export function App() {
         '--chat-width': `${chatWidth}px`
       }}
     >
-      <Sidebar 
-        onSelectPdf={handleSelectPdf} 
+      <Sidebar
+        onSelectPdf={handleSelectPdf}
         currentPdfName={currentPdfName}
       />
-      
-      <div 
-        className={`resizer-handle sidebar-resizer ${isResizingSidebar ? 'is-resizing' : ''}`} 
+
+      <div
+        className={`resizer-handle sidebar-resizer ${isResizingSidebar ? 'is-resizing' : ''}`}
         onMouseDown={() => setIsResizingSidebar(true)}
       />
 
       <main className="main-content">
         <header className="main-header">
-          <button 
-            className="sidebar-toggle" 
-            onClick={() => setSidebarOpen(!sidebarOpen)}
+          <button
+            className="sidebar-toggle"
+            onClick={() => {
+              setIsPdfMasking(true);
+              setSidebarOpen(!sidebarOpen);
+              setTimeout(() => {
+                setIsPdfMasking(false);
+              }, 600);
+            }}
             title="サイドバーを切替"
           >
             {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
           </button>
-          
+
           <div className="current-file-badge">
             {currentPdfName && `ファイル: ${currentPdfName}`}
           </div>
 
-          <button 
-            className={`chat-toggle ${chatOpen ? 'active' : ''}`} 
-            onClick={() => setChatOpen(!chatOpen)}
+          <button
+            className={`chat-toggle ${chatOpen ? 'active' : ''}`}
+            onClick={() => {
+              setIsPdfMasking(true);
+              setChatOpen(!chatOpen);
+              setTimeout(() => {
+                setIsPdfMasking(false);
+              }, 600);
+            }}
             title="AIチャット"
           >
             <MessageCircle size={18} />
@@ -169,34 +187,35 @@ export function App() {
 
         <div className="viewer-and-chat">
           <div className="pdf-viewer-wrapper" style={{ flex: 1, position: 'relative', display: 'flex', minWidth: 0 }}>
-            <PdfViewer 
-              pdfData={pdfData} 
-              onHoverText={handleHoverText} 
+            <div className={`pdf-mask ${isPdfMasking ? 'active' : ''}`}></div>
+            <PdfViewer
+              pdfData={pdfData}
+              onHoverText={handleHoverText}
               currentHoverText={tooltipText}
             />
           </div>
-          
+
           {chatOpen && (
-            <div 
-              className={`resizer-handle chat-resizer-global ${isResizingChat ? 'is-resizing' : ''}`} 
+            <div
+              className={`resizer-handle chat-resizer-global ${isResizingChat ? 'is-resizing' : ''}`}
               onMouseDown={() => setIsResizingChat(true)}
             />
           )}
 
-          <Chat 
-            lastExplainedText={lastHoverText} 
+          <Chat
+            lastExplainedText={lastHoverText}
             currentPdfName={currentPdfName}
             pdfContent={pdfContent}
             onResizerMouseDown={() => setIsResizingChat(true)}
             isResizing={isResizingChat}
           />
         </div>
-        
-        <Tooltip 
-          text={tooltipText} 
+
+        <Tooltip
+          text={tooltipText}
           currentTerm={lastHoverText}
-          position={tooltipPos} 
-          isVisible={isTooltipVisible} 
+          position={tooltipPos}
+          isVisible={isTooltipVisible}
           onClose={closeTooltip}
           onRequestExplanation={handleRequestExplanation}
           onRequestTranslation={handleRequestTranslation}
