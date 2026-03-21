@@ -23,7 +23,14 @@ export function getAiSettings() {
     const savedString = localStorage.getItem('ai_settings');
     if (!savedString) return DEFAULT_SETTINGS;
     
-    let saved = JSON.parse(savedString);
+    let saved = null;
+    try {
+        saved = JSON.parse(savedString);
+    } catch (e) {
+        console.error('Failed to parse AI settings:', e);
+    }
+    
+    if (!saved || typeof saved !== 'object') return DEFAULT_SETTINGS;
     
     if (saved.model && !saved.models) {
         saved.models = {

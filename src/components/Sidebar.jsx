@@ -29,7 +29,14 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
     useEffect(() => {
         loadFiles();
         const savedFolders = localStorage.getItem('mist_custom_folders');
-        if (savedFolders) setCustomFolders(JSON.parse(savedFolders));
+        if (savedFolders) {
+            try {
+                const parsed = JSON.parse(savedFolders);
+                if (Array.isArray(parsed)) setCustomFolders(parsed);
+            } catch (e) {
+                console.error('Failed to parse custom folders:', e);
+            }
+        }
         const handleClickOutside = (e) => {
             if (menuRef.current && !menuRef.current.contains(e.target)) {
                 setActiveMenu(null);
@@ -266,12 +273,12 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                     <div className="settings-section">
                         <h3>AI 設定</h3>
                         <div className="form-group">
-                            <label>Base URL</label>
-                            <input value={settings.baseUrl} onInput={e => setSettings({ ...settings, baseUrl: e.target.value })} placeholder="https://..." />
+                            <label htmlFor="ai-base-url">Base URL</label>
+                            <input id="ai-base-url" name="ai-base-url" value={settings.baseUrl} onInput={e => setSettings({ ...settings, baseUrl: e.target.value })} placeholder="https://..." autoComplete="off" />
                         </div>
                         <div className="form-group">
-                            <label>API Key</label>
-                            <input type="password" value={settings.apiKey} onInput={e => setSettings({ ...settings, apiKey: e.target.value })} placeholder="sk-..." />
+                            <label htmlFor="ai-api-key">API Key</label>
+                            <input id="ai-api-key" name="ai-api-key" type="password" value={settings.apiKey} onInput={e => setSettings({ ...settings, apiKey: e.target.value })} placeholder="sk-..." autoComplete="off" />
                         </div>
                         <div className="form-group">
                             <div className="model-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -290,13 +297,15 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                 // Determine if we should show manual input
                                 // 1. User clicked "Manual Input"
                                 // 2. Current model is not in available list and not empty
-                                const isManual = showManual[task.key] || (currentModel && !availableModels.includes(currentModel) && !DEFAULT_MODELS.includes(currentModel));
+                                const isManual = showManual[task.key] || (currentModel && !(availableModels || []).includes(currentModel) && !(DEFAULT_MODELS || []).includes(currentModel));
 
                                 if (isManual) {
                                     return (
                                         <div key={task.key} className="task-model-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                                             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', width: '50px' }}>{task.label}</span>
                                             <input
+                                                id={`model-${task.key}`}
+                                                name={`model-${task.key}`}
                                                 style={{ flex: 1 }}
                                                 type="text"
                                                 value={currentModel}
@@ -305,6 +314,7 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                     models: { ...settings.models, [task.key]: e.target.value }
                                                 })}
                                                 placeholder="モデル名を入力..."
+                                                autoComplete="off"
                                                 autoFocus
                                             />
                                             <button 
@@ -329,6 +339,8 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                     <div key={task.key} className="task-model-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                                         <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', width: '50px' }}>{task.label}</span>
                                         <select
+                                            id={`select-model-${task.key}`}
+                                            name={`select-model-${task.key}`}
                                             style={{ flex: 1 }}
                                             value={currentModel}
                                             onChange={e => {
@@ -341,6 +353,7 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                     });
                                                 }
                                             }}
+                                            autoComplete="off"
                                         >
                                             <option value="">(選択...)</option>
                                             {modelOptions.map(m => (
