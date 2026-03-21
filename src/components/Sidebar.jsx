@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { Settings, FileUp, List, Save, RefreshCw, Folder, Download, Edit3, Trash2, ChevronRight, ChevronDown, SortAsc, Plus, FolderPlus, Move, Check, X, MoreVertical, Calendar } from 'lucide-preact';
+import { Settings, FileUp, List, Save, RefreshCw, Folder, Download, Edit3, Trash2, ChevronRight, ChevronDown, Plus, FolderPlus, Move, Check, X, MoreVertical } from 'lucide-preact';
 import { getAiSettings, saveAiSettings, getAvailableModels } from '../services/ai';
-import { getPdfList, savePdf, renamePdf, deletePdf, updatePdfFolder, loadPdf } from '../services/storage';
+import { getPdfList, savePdf, renamePdf, deletePdf, updatePdfFolder, loadPdf, updatePdfList } from '../services/storage';
 
 export default function Sidebar({ onSelectPdf, currentPdfName }) {
     const [view, setView] = useState('files');
@@ -10,7 +10,6 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
     const [isUploading, setIsUploading] = useState(false);
     const [availableModels, setAvailableModels] = useState([]);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
-    const [sortOrder, setSortOrder] = useState('date');
     const [expandedFolders, setExpandedFolders] = useState(['Default']);
     const [editingFile, setEditingFile] = useState(null);
     const [newName, setNewName] = useState('');
@@ -85,14 +84,6 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
         setExpandedFolders(prev => prev.includes(folder) ? prev.filter(f => f !== folder) : [...prev, folder]);
     };
 
-    const sortedPdfs = [...pdfs].sort((a, b) => {
-        if (sortOrder === 'name') return a.name.localeCompare(b.name);
-        // Ensure updatedAt is a number for reliable sorting
-        const timeA = a.updatedAt || a.createdAt || 0;
-        const timeB = b.updatedAt || b.createdAt || 0;
-        return timeB - timeA;
-    });
-
     const allFolders = Array.from(new Set([...customFolders, ...pdfs.map(p => p.folder || 'Default')]));
 
     return (
@@ -108,12 +99,8 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                 {view === 'files' ? (
                     <div className="file-section">
                         <div className="file-top-bar">
-                            <button className="sort-btn" onClick={() => setSortOrder(sortOrder === 'name' ? 'date' : 'name')}>
-                                {sortOrder === 'name' ? <SortAsc size={14} /> : <Calendar size={14} />}
-                                <span>{sortOrder === 'name' ? '名前順' : '日付順'}</span>
-                            </button>
-                            <button className="new-folder-top-btn" onClick={() => setIsAddingFolder(true)}>
-                                <FolderPlus size={14} /> <span>フォルダ</span>
+                            <button className="new-folder-top-btn" onClick={() => setIsAddingFolder(true)} style={{ flex: 1 }}>
+                                <FolderPlus size={14} /> <span>新規フォルダ</span>
                             </button>
                         </div>
 
@@ -138,9 +125,31 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                         e.preventDefault();
                                         const fileName = e.dataTransfer.getData('fileName') || e.dataTransfer.getData('text/plain');
                                         if (fileName) {
-                                            const newFolderName = folder === 'Default' ? 'Default' : folder;
-                                            await updatePdfFolder(fileName, newFolderName);
-                                            await loadFiles();
+                                            const targetFolder = folder === 'Default' ? 'Default' : folder;
+                                            const newPdfs = [...pdfs];
+                                            const idx = newPdfs.findIndex(p => p.name === fileName);
+                                            if (idx !== -1) {
+                                                const [item] = newPdfs.splice(idx, 1);
+                                                item.folder = targetFolder;
+                                                
+                                                // Find last index of the folder to append to its end
+                                                let lastIdx = -1;
+                                                for (let i = newPdfs.length - 1; i >= 0; i--) {
+                                                    if ((newPdfs[i].folder || 'Default') === targetFolder) {
+                                                        lastIdx = i;
+                                                        break;
+                                                    }
+                                                }
+                                                
+                                                if (lastIdx !== -1) {
+                                                    newPdfs.splice(lastIdx + 1, 0, item);
+                                                } else {
+                                                    newPdfs.push(item);
+                                                }
+                                                
+                                                setPdfs(newPdfs);
+                                                await updatePdfList(newPdfs);
+                                            }
                                         }
                                     }}
                                 >
@@ -184,7 +193,7 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                     </div>
                                     {expandedFolders.includes(folder) && (
                                         <ul className="file-list">
-                                            {sortedPdfs.filter(p => (p.folder || 'Default') === folder).map(file => (
+                                            {pdfs.filter(p => (p.folder || 'Default') === folder).map(file => (
                                                 <li
                                                     key={file.name}
                                                     className={currentPdfName === file.name ? 'active' : ''}
@@ -193,6 +202,28 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                         e.dataTransfer.setData('fileName', file.name);
                                                         e.dataTransfer.setData('text/plain', file.name);
                                                         e.dataTransfer.effectAllowed = 'move';
+                                                    }}
+                                                    onDragOver={e => {
+                                                        e.preventDefault();
+                                                        e.dataTransfer.dropEffect = 'move';
+                                                    }}
+                                                    onDrop={async e => {
+                                                        e.preventDefault();
+                                                        e.stopPropagation();
+                                                        const draggedFileName = e.dataTransfer.getData('fileName');
+                                                        if (draggedFileName && draggedFileName !== file.name) {
+                                                            const newPdfs = [...pdfs];
+                                                            const srcIdx = newPdfs.findIndex(p => p.name === draggedFileName);
+                                                            const dstIdx = newPdfs.findIndex(p => p.name === file.name);
+                                                            if (srcIdx !== -1 && dstIdx !== -1) {
+                                                                const [item] = newPdfs.splice(srcIdx, 1);
+                                                                item.folder = file.folder || 'Default';
+                                                                const insertIdx = newPdfs.findIndex(p => p.name === file.name);
+                                                                newPdfs.splice(insertIdx, 0, item);
+                                                                setPdfs(newPdfs);
+                                                                await updatePdfList(newPdfs);
+                                                            }
+                                                        }
                                                     }}
                                                 >
                                                     <div className="file-item-main" onClick={() => onSelectPdf(file.name)}>

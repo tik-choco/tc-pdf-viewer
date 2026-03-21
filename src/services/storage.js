@@ -70,6 +70,10 @@ export async function updatePdfFolder(name, folder) {
     }
 }
 
+export async function updatePdfList(newIndex) {
+    localStorage.setItem('mist_files_index', JSON.stringify(newIndex));
+}
+
 export async function getPdfList() {
     return getFilesIndex();
 }

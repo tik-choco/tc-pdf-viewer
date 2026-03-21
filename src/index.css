@@ -251,6 +251,11 @@ select option {
   font-size: 0.85rem;
   color: var(--text-muted);
   margin-bottom: 2px;
+  cursor: grab;
+}
+
+.file-list li:active {
+  cursor: grabbing;
 }
 
 .file-list li:hover {
