@@ -15,6 +15,8 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
   const [showLangs, setShowLangs] = useState(false);
   const [targetLanguages, setTargetLanguages] = useState([]);
   const [hasDragged, setHasDragged] = useState(false);
+  const [measuredHeight, setMeasuredHeight] = useState(null);
+  const measureRef = useRef(null);
 
   useEffect(() => {
     const settings = getAiSettings();
@@ -94,7 +96,6 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
   useEffect(() => {
     if (isVisible) {
       setShouldRender(true);
-      // Small timeout to trigger transition
       const timer = setTimeout(() => setIsActuallyVisible(true), 20);
       return () => clearTimeout(timer);
     } else {
@@ -104,6 +105,18 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
     }
   }, [isVisible]);
 
+  useEffect(() => {
+    if (measureRef.current && shouldRender) {
+      const obs = new ResizeObserver((entries) => {
+        for (let entry of entries) {
+          setMeasuredHeight(entry.contentRect.height);
+        }
+      });
+      obs.observe(measureRef.current);
+      return () => obs.disconnect();
+    }
+  }, [shouldRender]);
+
   if (!shouldRender || !currentTerm) return null;
 
   const smoothEasing = 'cubic-bezier(0.16, 1, 0.3, 1)';
@@ -111,23 +124,25 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
   return (
     <div
       ref={tooltipRef}
-      className={`ai-tooltip ${text && text !== 'loading' ? 'wide' : ''} ${showLangs ? 'langs-open' : ''} ${isDragging ? 'is-dragging' : ''} ${isActuallyVisible ? 'active' : ''}`}
+      className={`ai-tooltip ${text && text !== 'loading' ? 'wide' : ''} ${text === 'loading' ? 'loading-state' : ''} ${showLangs ? 'langs-open' : ''} ${isDragging ? 'is-dragging' : ''} ${isActuallyVisible ? 'active' : ''}`}
       style={{
         left: position.x + offset.x + dragOffset.x,
         top: position.y + offset.y + dragOffset.y,
         opacity: isActuallyVisible ? 1 : 0,
+        height: measuredHeight && isActuallyVisible ? `${measuredHeight}px` : 'auto',
         transform: `translateY(${isActuallyVisible ? 0 : 10}px) scale(${isActuallyVisible ? 1 : 0.95})`,
         transition: isDragging ? 'none' : `
           opacity 0.3s ${smoothEasing},
           transform 0.4s ${smoothEasing},
           width 0.3s ${smoothEasing},
-          height 0.3s ${smoothEasing},
-          left 0.3s ${smoothEasing},
-          top 0.3s ${smoothEasing}
+          height 0.4s ${smoothEasing},
+          left 0.4s ${smoothEasing},
+          top 0.4s ${smoothEasing}
         `.trim()
       }}
     >
-      <div className="tooltip-header" onMouseDown={handleMouseDown}>
+      <div ref={measureRef} className="tooltip-inner-measure">
+        <div className="tooltip-header" onMouseDown={handleMouseDown}>
         <div className="header-left">
            <span className="ai-label">{text === 'loading' ? '処理中...' : text ? 'AI 結果' : '選択中の用語'}</span>
         </div>
@@ -199,5 +214,6 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
         )}
       </div>
     </div>
-  );
+  </div>
+);
 }

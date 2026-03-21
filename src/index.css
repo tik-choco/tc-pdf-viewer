@@ -997,7 +997,20 @@ select option {
   overflow: visible;
   max-height: 450px;
   transform-origin: center bottom;
-  will-change: transform, opacity, width;
+  will-change: transform, opacity, width, height;
+  overflow: hidden;
+}
+
+.tooltip-inner-measure {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  height: auto;
+  max-height: 450px;
+}
+
+.ai-tooltip.wide .tooltip-inner-measure {
+  max-height: 500px;
 }
 
 @keyframes tooltipIntro {
@@ -1028,6 +1041,10 @@ select option {
 .ai-tooltip.wide {
   width: 450px;
   max-height: 500px;
+}
+
+.ai-tooltip.loading-state {
+  width: 220px;
 }
 
 .ai-tooltip.is-dragging {
@@ -1193,6 +1210,11 @@ select option {
   padding: 4px;
 }
 
+/* Ensure menu is visible even with overflow:hidden on parent if we use static/relative */
+.ai-tooltip.langs-open {
+  overflow: visible;
+}
+
 .lang-item {
   display: block;
   width: 100%;
@@ -1220,12 +1242,24 @@ select option {
 }
 
 .spinner {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border: 2px solid rgba(255, 255, 255, 0.1);
   border-top-color: var(--primary);
   border-radius: 50%;
-  animation: spin 1s linear infinite;
+  animation: spin 0.8s cubic-bezier(0.5, 0.1, 0.5, 0.9) infinite;
+  filter: drop-shadow(0 0 5px var(--primary));
+}
+
+.loading-spinner span {
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
 }
 
 /* Markdown Body overrides for dark theme */
