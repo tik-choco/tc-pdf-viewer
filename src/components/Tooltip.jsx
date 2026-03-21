@@ -88,18 +88,41 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
     }
   };
 
-  if (!isVisible || !currentTerm) return null;
+  const [shouldRender, setShouldRender] = useState(isVisible);
+  const [isActuallyVisible, setIsActuallyVisible] = useState(false);
+
+  useEffect(() => {
+    if (isVisible) {
+      setShouldRender(true);
+      // Small timeout to trigger transition
+      const timer = setTimeout(() => setIsActuallyVisible(true), 20);
+      return () => clearTimeout(timer);
+    } else {
+      setIsActuallyVisible(false);
+      const timer = setTimeout(() => setShouldRender(false), 300);
+      return () => clearTimeout(timer);
+    }
+  }, [isVisible]);
+
+  if (!shouldRender || !currentTerm) return null;
+
+  const smoothEasing = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
   return (
     <div
       ref={tooltipRef}
-      className={`ai-tooltip ${text && text !== 'loading' ? 'wide' : ''} ${showLangs ? 'langs-open' : ''} ${isDragging ? 'is-dragging' : ''}`}
+      className={`ai-tooltip ${text && text !== 'loading' ? 'wide' : ''} ${showLangs ? 'langs-open' : ''} ${isDragging ? 'is-dragging' : ''} ${isActuallyVisible ? 'active' : ''}`}
       style={{
         left: position.x + offset.x + dragOffset.x,
         top: position.y + offset.y + dragOffset.y,
-        opacity: isVisible ? 1 : 0,
-        transform: `translateY(${isVisible ? 0 : 4}px)`,
-        transition: isDragging ? 'none' : 'opacity 0.2s, transform 0.2s, width 0.3s'
+        opacity: isActuallyVisible ? 1 : 0,
+        transform: `translateY(${isActuallyVisible ? 0 : 10}px) scale(${isActuallyVisible ? 1 : 0.95})`,
+        transition: isDragging ? 'none' : `
+          opacity 0.3s ${smoothEasing},
+          transform 0.4s ${smoothEasing},
+          width 0.3s ${smoothEasing},
+          height 0.3s ${smoothEasing}
+        `.trim()
       }}
     >
       <div className="tooltip-header" onMouseDown={handleMouseDown}>

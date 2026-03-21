@@ -54,7 +54,7 @@ select option {
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  transition: width 0.3s ease;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
   z-index: 100;
   overflow: hidden;
   white-space: nowrap;
@@ -327,13 +327,27 @@ select option {
   position: absolute;
   top: 100%;
   right: 0;
-  background: #1e293b;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 8px;
+  background: rgba(30, 41, 59, 0.95);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
   z-index: 1000;
-  min-width: 150px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  padding: 6px;
+  animation: dropdownPop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+@keyframes dropdownPop {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
 }
 
 .menu-item {
@@ -697,7 +711,7 @@ select option {
   flex-direction: column;
   flex-shrink: 0;
   overflow: hidden;
-  transition: width 0.3s ease;
+  transition: width 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease;
   z-index: 50;
   opacity: 1;
   position: relative;
@@ -968,16 +982,47 @@ select option {
 .ai-tooltip {
   position: fixed;
   z-index: 2000;
-  background: var(--bg-sidebar);
+  background: rgba(30, 41, 59, 0.85);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 12px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
-  width: 280px;
+  border-radius: 14px;
+  box-shadow: 
+    0 4px 6px -1px rgba(0, 0, 0, 0.1),
+    0 20px 50px -12px rgba(0, 0, 0, 0.6),
+    inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  width: 300px;
   display: flex;
   flex-direction: column;
   overflow: visible;
-  /* Prevent dropdown clipping */
-  max-height: 400px;
+  max-height: 450px;
+  transform-origin: center bottom;
+  will-change: transform, opacity, width;
+}
+
+@keyframes tooltipIntro {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.ai-tooltip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 14px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), transparent, rgba(255, 255, 255, 0.05));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
 }
 
 .ai-tooltip.wide {
