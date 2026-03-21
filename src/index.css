@@ -106,6 +106,27 @@ select option {
   padding: 0 12px 60px;
 }
 
+.sidebar-footer {
+  padding: 12px 16px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  border-top: var(--border-glass);
+  text-align: center;
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.sidebar-footer a {
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.sidebar-footer a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .file-top-bar {
   display: flex;
   gap: 8px;
@@ -769,14 +790,15 @@ select option {
 }
 
 .msg-icon {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   background: rgba(255, 255, 255, 0.05);
   flex-shrink: 0;
+  margin-top: 4px;
 }
 
 .chat-message.assistant .msg-icon {
@@ -847,9 +869,7 @@ select option {
   background: var(--primary);
   color: white;
   width: auto;
-  word-break: normal;
-  overflow-wrap: break-word;
-  line-break: strict;
+  word-break: break-word;
 }
 
 .chat-message.assistant .msg-bubble {
@@ -869,8 +889,8 @@ select option {
 }
 
 .clear-chat-btn:hover {
-  color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  color: white;
+  background: #ef4444;
 }
 
 ::-webkit-scrollbar {

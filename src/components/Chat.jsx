@@ -130,7 +130,7 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, on
                     <div key={idx} className={`chat-message ${m.role}`}>
                         {m.role === 'assistant' && (
                             <div className="msg-icon">
-                                <Bot size={24} />
+                                <Bot size={14} />
                             </div>
                         )}
                         <div className="msg-bubble-wrapper">

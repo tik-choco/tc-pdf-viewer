@@ -283,7 +283,9 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                     </div>
                 )}
             </div>
-            <div className="sidebar-footer">Powered by mistlib</div>
+            <div className="sidebar-footer">
+                Powered by <a href="https://github.com/tik-choco-lab/mistlib" target="_blank" rel="noopener noreferrer">mistlib</a>
+            </div>
         </div>
     );
 }
