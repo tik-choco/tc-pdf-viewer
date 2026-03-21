@@ -3,7 +3,7 @@ import Sidebar from './components/Sidebar';
 import PdfViewer from './components/PdfViewer';
 import Tooltip from './components/Tooltip';
 import Chat from './components/Chat';
-import { loadPdf } from './services/storage';
+import { loadPdf, renamePdf } from './services/storage';
 import { extractText } from './services/pdf';
 import { explainText, translateText, getAiSettings } from './services/ai';
 import { PanelLeftClose, PanelLeftOpen, MessageCircle } from 'lucide-preact';
@@ -20,6 +20,8 @@ export function App() {
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isResizingChat, setIsResizingChat] = useState(false);
   const [isPdfMasking, setIsPdfMasking] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
 
   const [tooltipText, setTooltipText] = useState(null);
   const [lastHoverText, setLastHoverText] = useState(null);
@@ -81,6 +83,19 @@ export function App() {
         setIsPdfMasking(false);
       }, 0);
     }
+  };
+
+  const handleHeaderRename = async () => {
+    if (!renameValue.trim() || renameValue === currentPdfName) {
+      setIsRenaming(false);
+      return;
+    }
+    const success = await renamePdf(currentPdfName, renameValue);
+    if (success) {
+      setCurrentPdfName(renameValue);
+      localStorage.setItem('mist_last_pdf', renameValue);
+    }
+    setIsRenaming(false);
   };
 
   useEffect(() => {
@@ -166,7 +181,25 @@ export function App() {
           </button>
 
           <div className="current-file-badge">
-            {currentPdfName && `ファイル: ${currentPdfName}`}
+            {currentPdfName && (
+              isRenaming ? (
+                <input
+                  className="rename-header-input"
+                  value={renameValue}
+                  onInput={e => setRenameValue(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') handleHeaderRename();
+                    if (e.key === 'Escape') setIsRenaming(false);
+                  }}
+                  onBlur={handleHeaderRename}
+                  autoFocus
+                />
+              ) : (
+                <div className="file-name-display" onClick={() => { setIsRenaming(true); setRenameValue(currentPdfName); }} title="クリックして名前を変更">
+                  ファイル: <span className="editable-name">{currentPdfName}</span>
+                </div>
+              )
+            )}
           </div>
 
           <button

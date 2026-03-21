@@ -520,6 +520,45 @@ select option {
   padding: 4px 12px;
   border-radius: 8px;
   color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  transition: var(--transition);
+}
+
+.file-name-display {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.file-name-display:hover .editable-name {
+  color: var(--primary);
+}
+
+.editable-name {
+  color: var(--text-main);
+  font-weight: 500;
+  transition: var(--transition);
+}
+
+.rename-header-input {
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--primary);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.8rem;
+  color: var(--text-main);
+  outline: none;
+  min-width: 150px;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 /* Main Area Layout Restored */

@@ -46,6 +46,15 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
         return () => document.removeEventListener('mousedown', handleClickOutside);
     }, []);
 
+    useEffect(() => {
+        if (currentPdfName && pdfs.length > 0) {
+            const fileExists = pdfs.some(p => p.name === currentPdfName);
+            if (!fileExists) {
+                loadFiles();
+            }
+        }
+    }, [currentPdfName]);
+
     const loadFiles = async () => {
         const list = await getPdfList();
         setPdfs(list);
