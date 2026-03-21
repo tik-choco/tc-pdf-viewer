@@ -1,13 +1,14 @@
 import { useState, useMemo, useCallback } from 'preact/hooks';
 import { Viewer, Worker, SpecialZoomLevel } from '@react-pdf-viewer/core';
 import { zoomPlugin } from '@react-pdf-viewer/zoom';
+import { Download } from 'lucide-preact';
 
 import '@react-pdf-viewer/core/lib/styles/index.css';
 import '@react-pdf-viewer/zoom/lib/styles/index.css';
 
 const workerUrl = new URL('pdfjs-dist/build/pdf.worker.js', import.meta.url).toString();
 
-export default function PdfViewer({ pdfData, onHoverText }) {
+export default function PdfViewer({ pdfData, fileName, onHoverText }) {
     const [fileUrl, setFileUrl] = useState(null);
     
     const zoomLevels = useMemo(() => {
@@ -45,6 +46,16 @@ export default function PdfViewer({ pdfData, onHoverText }) {
         }, 50);
     }, [onHoverText]);
 
+    const handleDownload = useCallback(() => {
+        if (!fileUrl) return;
+        const a = document.createElement('a');
+        a.href = fileUrl;
+        a.download = fileName || 'document.pdf';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    }, [fileUrl, fileName]);
+
     if (!pdfData || !fileUrl) {
         return (
             <div className="pdf-viewer-container empty-state">
@@ -61,6 +72,10 @@ export default function PdfViewer({ pdfData, onHoverText }) {
                     <ZoomOut />
                     <Zoom />
                     <ZoomIn />
+                    <div style={{ width: '1px', height: '16px', background: 'rgba(255,255,255,0.1)', margin: '0 4px' }} />
+                    <button className="toolbar-btn" onClick={handleDownload} title="ダウンロード">
+                        <Download size={16} />
+                    </button>
                 </div>
                 <div className="toolbar-right"></div>
             </div>

@@ -190,6 +190,7 @@ export function App() {
             <div className={`pdf-mask ${isPdfMasking ? 'active' : ''}`}></div>
             <PdfViewer
               pdfData={pdfData}
+              fileName={currentPdfName}
               onHoverText={handleHoverText}
               currentHoverText={tooltipText}
             />
