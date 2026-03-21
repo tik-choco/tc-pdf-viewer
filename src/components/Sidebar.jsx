@@ -142,7 +142,6 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                 const [item] = newPdfs.splice(idx, 1);
                                                 item.folder = targetFolder;
                                                 
-                                                // Find last index of the folder to append to its end
                                                 let lastIdx = -1;
                                                 for (let i = newPdfs.length - 1; i >= 0; i--) {
                                                     if ((newPdfs[i].folder || 'Default') === targetFolder) {
@@ -303,9 +302,6 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                 { key: 'chat', label: 'チャット' }
                             ].map(task => {
                                 const currentModel = settings.models?.[task.key] || '';
-                                // Determine if we should show manual input
-                                // 1. User clicked "Manual Input"
-                                // 2. Current model is not in available list and not empty
                                 const isManual = showManual[task.key] || (currentModel && !(availableModels || []).includes(currentModel) && !(DEFAULT_MODELS || []).includes(currentModel));
 
                                 if (isManual) {

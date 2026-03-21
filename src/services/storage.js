@@ -16,7 +16,6 @@ export async function initMist() {
     return node;
 }
 
-// Manage index in localStorage since CID changes on every file addition
 function getFilesIndex() {
     const saved = localStorage.getItem('mist_files_index');
     return saved ? JSON.parse(saved) : [];
@@ -87,16 +86,13 @@ export async function loadPdf(name) {
         throw new Error(`CID not found locally for PDF: ${name}`);
     }
 
-    // storage_get requires CIDv1
     return await storage_get(file.cid);
 }
 
 export async function saveExplanation(text, explanation) {
     await initMist();
-    // Mist storage_add returns CID
     const cid = await storage_add(text, new TextEncoder().encode(explanation));
     
-    // Save to explanation index
     const index = JSON.parse(localStorage.getItem('mist_explanations_index') || '{}');
     index[text] = cid;
     localStorage.setItem('mist_explanations_index', JSON.stringify(index));

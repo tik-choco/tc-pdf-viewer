@@ -42,19 +42,15 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
   useEffect(() => {
     if (tooltipRef.current && position && !isDragging && !hasDragged) {
       const toolRect = tooltipRef.current.getBoundingClientRect();
-      const targetRect = position; // Now a full selection rect
-
+      const targetRect = position;
       // Calculate best position
-      // Prefer: Top center
       let preferredX = targetRect.left + (targetRect.width / 2) - (toolRect.width / 2);
-      let preferredY = targetRect.top - toolRect.height - 15; // Above the selection
+      let preferredY = targetRect.top - toolRect.height - 15;
 
-      // If it doesn't fit at the top, try bottom
       if (preferredY < 10) {
-        preferredY = targetRect.bottom + 15; // Below the selection
+        preferredY = targetRect.bottom + 15;
       }
 
-      // Keep within viewport
       preferredX = Math.max(10, Math.min(preferredX, window.innerWidth - toolRect.width - 10));
       preferredY = Math.max(10, Math.min(preferredY, window.innerHeight - toolRect.height - 10));
 

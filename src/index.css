@@ -193,7 +193,6 @@ select option {
   font-size: 0.8rem;
 }
 
-/* Folders */
 .folder-group {
   margin-bottom: 4px;
 }
@@ -259,7 +258,6 @@ select option {
   color: #ef4444;
 }
 
-/* File List */
 .file-list {
   list-style: none;
   padding-left: 16px;
@@ -367,7 +365,6 @@ select option {
   color: var(--primary);
 }
 
-/* Settings */
 .settings-section {
   padding: 16px;
 }
@@ -504,7 +501,6 @@ select option {
   cursor: not-allowed;
 }
 
-/* Main Area */
 .main-header {
   height: 48px;
   border-bottom: var(--border-glass);
@@ -561,7 +557,6 @@ select option {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Main Area Layout Restored */
 .main-content {
   flex: 1;
   display: flex;
@@ -627,7 +622,6 @@ select option {
   padding: 0 16px;
   flex-shrink: 0;
   z-index: 10;
-  /* Ensure tooltip/dropdown is above PDF */
 }
 
 .zoom-controls {
@@ -653,7 +647,6 @@ select option {
   color: var(--text-main);
 }
 
-/* Force dark theme for PDF Viewer Popovers */
 .rpv-core__popover-body {
   background-color: var(--bg-sidebar) !important;
   border: 1px solid rgba(255, 255, 255, 0.1) !important;
@@ -678,7 +671,6 @@ select option {
   border-top-color: var(--bg-sidebar) !important;
 }
 
-/* Toggles */
 .sidebar-toggle,
 .chat-toggle {
   background: transparent;
@@ -717,7 +709,6 @@ select option {
   border-color: rgba(99, 102, 241, 0.3);
 }
 
-/* Resizers */
 .resizer-handle {
   width: 4px;
   height: 100%;
