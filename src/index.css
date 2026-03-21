@@ -135,12 +135,10 @@ select option {
 }
 
 .file-bottom-bar {
-  margin-top: 12px;
-  margin-bottom: 0;
+  margin-top: 4px;
 }
 
-.sort-btn,
-.new-folder-top-btn {
+.sort-btn {
   flex: 1;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -155,10 +153,30 @@ select option {
   transition: var(--transition);
 }
 
-.sort-btn:hover,
-.new-folder-top-btn:hover {
+.sort-btn:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: var(--primary);
+}
+
+.new-folder-top-btn {
+  width: 100%;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  transition: var(--transition);
+  opacity: 0.5;
+}
+
+.new-folder-top-btn:hover {
+  opacity: 1;
+  color: var(--primary);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .inline-add-folder {
