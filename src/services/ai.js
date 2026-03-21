@@ -83,12 +83,16 @@ export async function chatAi(messages, task = 'chat') {
     const settings = getAiSettings();
     if (!settings.apiKey) throw new Error('APIキーが設定されていません。');
 
+    const baseUrl = (settings.baseUrl || '').replace(/\/$/, '');
+    if (!baseUrl) throw new Error('AI Base URLが設定されていません。');
+
     const model = settings.models?.[task] || settings.models?.chat || 'gpt-4o';
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
 
+    const url = `${baseUrl}/chat/completions`;
     try {
-        const response = await fetch(`${settings.baseUrl}/chat/completions`, {
+        const response = await fetch(url, {
             method: 'POST',
             signal: controller.signal,
             headers: {
@@ -105,14 +109,20 @@ export async function chatAi(messages, task = 'chat') {
 
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
-            throw new Error(error.error?.message || `APIリクエストに失敗しました: ${response.status}`);
+            const msg = error.error?.message || `APIリクエストに失敗しました: ${response.status} ${response.statusText}`;
+            console.error(`AI Error from ${url}:`, msg);
+            throw new Error(msg);
         }
 
         const data = await response.json();
         return data.choices[0].message.content.trim();
     } catch (err) {
         clearTimeout(timeoutId);
+        console.error(`AI Request to ${url} failed:`, err);
         if (err.name === 'AbortError') throw new Error('リクエストがタイムアウトしました。');
+        if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+            throw new Error('API通信エラー（CORSまたはMixed Contentの可能性があります）');
+        }
         throw err;
     }
 }
@@ -121,17 +131,32 @@ export async function getAvailableModels() {
     const settings = getAiSettings();
     if (!settings.apiKey) return [];
 
+    // Ensure baseUrl has no trailing slash and isn't empty
+    const baseUrl = (settings.baseUrl || '').replace(/\/$/, '');
+    if (!baseUrl) {
+        console.warn('AI Base URL is empty. Please set it in settings.');
+        return [];
+    }
+
+    const url = `${baseUrl}/models`;
     try {
-        const response = await fetch(`${settings.baseUrl}/models`, {
+        const response = await fetch(url, {
             headers: {
                 'Authorization': `Bearer ${settings.apiKey}`
             }
         });
-        if (!response.ok) return [];
+        if (!response.ok) {
+            console.error(`Failed to fetch models from ${url}: ${response.status} ${response.statusText}`);
+            return [];
+        }
         const data = await response.json();
         return data.data.map(m => m.id).sort();
     } catch (err) {
-        console.error('Failed to fetch models:', err);
+        console.error(`Failed to fetch models from ${url}:`, err);
+        // Special hint for CORS/Mixed Content
+        if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+            console.error('This is likely a CORS or Mixed Content (HTTPS to HTTP) error. Check your API endpoint and browser console.');
+        }
         return [];
     }
 }
