@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { Settings, FileUp, List, Save, RefreshCw, Folder, Download, Edit3, Trash2, ChevronRight, ChevronDown, SortAsc, Plus, FolderPlus, Move, Check, X, MoreVertical } from 'lucide-preact';
+import { Settings, FileUp, List, Save, RefreshCw, Folder, Download, Edit3, Trash2, ChevronRight, ChevronDown, SortAsc, Plus, FolderPlus, Move, Check, X, MoreVertical, Calendar } from 'lucide-preact';
 import { getAiSettings, saveAiSettings, getAvailableModels } from '../services/ai';
 import { getPdfList, savePdf, renamePdf, deletePdf, updatePdfFolder, loadPdf } from '../services/storage';
 
@@ -13,23 +13,20 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
     const [sortOrder, setSortOrder] = useState('date');
     const [expandedFolders, setExpandedFolders] = useState(['Default']);
     const [editingFile, setEditingFile] = useState(null);
-    const [movingFile, setMovingFile] = useState(null);
     const [newName, setNewName] = useState('');
     const [isAddingFolder, setIsAddingFolder] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
     const [customFolders, setCustomFolders] = useState(['Default']);
-    const [activeMenu, setActiveMenu] = useState(null); // { type, id }
+    const [activeMenu, setActiveMenu] = useState(null);
     const menuRef = useRef(null);
 
     useEffect(() => {
         loadFiles();
         const savedFolders = localStorage.getItem('mist_custom_folders');
         if (savedFolders) setCustomFolders(JSON.parse(savedFolders));
-
         const handleClickOutside = (e) => {
             if (menuRef.current && !menuRef.current.contains(e.target)) {
                 setActiveMenu(null);
-                setIsAddingFolder(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -41,48 +38,38 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
         setPdfs(list);
     };
 
+    const fetchModels = async () => {
+        setIsLoadingModels(true);
+        const models = await getAvailableModels();
+        setAvailableModels(models);
+        setIsLoadingModels(false);
+    };
+
     const handleUpload = async (e, folderName) => {
         const file = e.target.files[0];
         if (!file) return;
         setIsUploading(true);
-        setActiveMenu(null);
         try {
             const buffer = await file.arrayBuffer();
             await savePdf(file.name, new Uint8Array(buffer));
             await updatePdfFolder(file.name, folderName);
             await loadFiles();
             onSelectPdf(file.name);
-        } catch (err) { alert('失敗'); } finally { setIsUploading(false); }
+        } catch (err) { alert('アップロード失敗'); } finally { setIsUploading(false); }
     };
 
     const handleAddFolder = () => {
         if (!newFolderName.trim()) { setIsAddingFolder(false); return; }
-        if (!customFolders.includes(newFolderName)) {
-            const newList = [...customFolders, newFolderName];
-            setCustomFolders(newList);
-            localStorage.setItem('mist_custom_folders', JSON.stringify(newList));
-            setExpandedFolders(prev => [...prev, newFolderName]);
-        }
+        const newList = customFolders.includes(newFolderName) ? customFolders : [...customFolders, newFolderName];
+        setCustomFolders(newList);
+        localStorage.setItem('mist_custom_folders', JSON.stringify(newList));
+        setExpandedFolders(prev => [...prev, newFolderName]);
         setNewFolderName(''); setIsAddingFolder(false);
     };
 
-    const handleDeleteFolder = (folderName) => {
-        if (folderName === 'Default') return;
-        if (confirm(`フォルダ「${folderName}」を削除してもよろしいですか？（中のファイルはDefaultに移動します）`)) {
-            const newList = customFolders.filter(f => f !== folderName);
-            setCustomFolders(newList);
-            localStorage.setItem('mist_custom_folders', JSON.stringify(newList));
-            pdfs.forEach(async p => {
-                if (p.folder === folderName) await updatePdfFolder(p.name, 'Default');
-            });
-            loadFiles();
-        }
-    };
-
-    const handleMoveToFolder = async (fileName, folder) => {
-        await updatePdfFolder(fileName, folder);
-        await loadFiles();
-        setMovingFile(null);
+    const handleSaveSettings = () => {
+        saveAiSettings(settings);
+        setView('files');
     };
 
     const handleRename = async (oldName) => {
@@ -90,9 +77,20 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
         await renamePdf(oldName, newName); await loadFiles(); setEditingFile(null);
     };
 
+    const handleDelete = async (name) => {
+        if (confirm(`削除しますか？`)) { await deletePdf(name); await loadFiles(); }
+    };
+
+    const toggleFolder = (folder) => {
+        setExpandedFolders(prev => prev.includes(folder) ? prev.filter(f => f !== folder) : [...prev, folder]);
+    };
+
     const sortedPdfs = [...pdfs].sort((a, b) => {
         if (sortOrder === 'name') return a.name.localeCompare(b.name);
-        return (b.updatedAt || 0) - (a.updatedAt || 0);
+        // Ensure updatedAt is a number for reliable sorting
+        const timeA = a.updatedAt || a.createdAt || 0;
+        const timeB = b.updatedAt || b.createdAt || 0;
+        return timeB - timeA;
     });
 
     const allFolders = Array.from(new Set([...customFolders, ...pdfs.map(p => p.folder || 'Default')]));
@@ -111,15 +109,16 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                     <div className="file-section">
                         <div className="file-top-bar">
                             <button className="sort-btn" onClick={() => setSortOrder(sortOrder === 'name' ? 'date' : 'name')}>
-                                <SortAsc size={14} /> {sortOrder === 'name' ? '名前' : '日付'}
+                                {sortOrder === 'name' ? <SortAsc size={14} /> : <Calendar size={14} />}
+                                <span>{sortOrder === 'name' ? '名前順' : '日付順'}</span>
                             </button>
                             <button className="new-folder-top-btn" onClick={() => setIsAddingFolder(true)}>
-                                <FolderPlus size={14} /> フォルダ
+                                <FolderPlus size={14} /> <span>フォルダ</span>
                             </button>
                         </div>
 
                         {isAddingFolder && (
-                            <div className="inline-add-folder" ref={menuRef}>
+                            <div className="inline-add-folder">
                                 <input className="folder-name-input" placeholder="名前..." value={newFolderName} onInput={e => setNewFolderName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleAddFolder(); if (e.key === 'Escape') setIsAddingFolder(false); }} autoFocus />
                                 <button onClick={handleAddFolder}><Check size={14} /></button>
                             </div>
@@ -127,7 +126,7 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                         
                         <div className="folder-list">
                             {allFolders.map(folder => (
-                                <div key={folder} className={`folder-group ${expandedFolders.includes(folder) ? 'expanded' : ''}`}>
+                                <div key={folder} className="folder-group">
                                     <div className="folder-header">
                                         <div className="folder-info" onClick={() => toggleFolder(folder)}>
                                             {expandedFolders.includes(folder) ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -135,27 +134,18 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                             <span>{folder}</span>
                                             <span className="count">{pdfs.filter(p => (p.folder || 'Default') === folder).length}</span>
                                         </div>
-                                        
-                                        <div className="folder-menu-container" ref={activeMenu?.id === folder ? menuRef : null}>
-                                            <button className="folder-plus-btn" onClick={() => setActiveMenu(activeMenu?.id === folder ? null : { type:'folder', id:folder })}>
+                                        <div className="folder-actions-direct">
+                                            <label className="icon-action-btn" title="アップロード">
                                                 <Plus size={16} />
-                                            </button>
-                                            {activeMenu?.id === folder && (
-                                                <div className="folder-dropdown">
-                                                    <label className="menu-item">
-                                                        <FileUp size={14} /> アップロード
-                                                        <input type="file" accept="application/pdf" onChange={e => handleUpload(e, folder)} hidden />
-                                                    </label>
-                                                    {folder !== 'Default' && (
-                                                        <button className="menu-item delete" onClick={() => handleDeleteFolder(folder)}>
-                                                            <Trash2 size={14} /> 削除
-                                                        </button>
-                                                    )}
-                                                </div>
+                                                <input type="file" accept="application/pdf" onChange={e => handleUpload(e, folder)} hidden />
+                                            </label>
+                                            {folder !== 'Default' && (
+                                                <button className="icon-action-btn delete" title="フォルダ削除" onClick={() => { if(confirm(`「${folder}」を削除しますか？`)){ setCustomFolders(f=>f.filter(x=>x!==folder)); localStorage.setItem('mist_custom_folders', JSON.stringify(customFolders.filter(x=>x!==folder))); } }}>
+                                                    <Trash2 size={12} />
+                                                </button>
                                             )}
                                         </div>
                                     </div>
-
                                     {expandedFolders.includes(folder) && (
                                         <ul className="file-list">
                                             {sortedPdfs.filter(p => (p.folder || 'Default') === folder).map(file => (
@@ -169,14 +159,14 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                                                     </div>
                                                     <div className="file-actions">
                                                         <div className="dropdown-container" ref={activeMenu?.id === file.name ? menuRef : null}>
-                                                            <button onClick={() => setActiveMenu(activeMenu?.id === file.name ? null : { type:'file', id:file.name })}>
-                                                                <MoreVertical size={12} />
+                                                            <button className="file-menu-btn" onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu?.id === file.name ? null : { id:file.name }); }}>
+                                                                <MoreVertical size={14} />
                                                             </button>
                                                             {activeMenu?.id === file.name && (
                                                                 <div className="file-dropdown">
-                                                                    <button className="menu-item" onClick={() => { setEditingFile(file.name); setNewName(file.name); setActiveMenu(null); }}><Edit3 size={14} /> 名前変更</button>
-                                                                    <button className="menu-item" onClick={() => { loadPdf(file.name).then(data => { const b=new Blob([data],{type:'application/pdf'}); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u; a.download=file.name; a.click(); }); setActiveMenu(null); }}><Download size={14} /> ダウンロード</button>
-                                                                    <button className="menu-item delete" onClick={() => { if(confirm('削除？')){deletePdf(file.name).then(loadFiles);} setActiveMenu(null); }}><Trash2 size={14} /> 削除</button>
+                                                                    <button className="menu-item" onClick={() => { setEditingFile(file.name); setNewName(file.name); setActiveMenu(null); }}><Edit3 size={14} /> リネーム</button>
+                                                                    <button className="menu-item" onClick={() => { loadPdf(file.name).then(d=>{const b=new Blob([d],{type:'application/pdf'});const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=file.name;a.click();}); setActiveMenu(null); }}><Download size={14} /> ダウンロード</button>
+                                                                    <button className="menu-item delete" onClick={() => { handleDelete(file.name); setActiveMenu(null); }}><Trash2 size={14} /> 削除</button>
                                                                 </div>
                                                             )}
                                                         </div>
@@ -191,7 +181,60 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
                     </div>
                 ) : (
                     <div className="settings-section">
-                        {/* settings content ... */}
+                        <h3>AI 設定</h3>
+                        <div className="form-group">
+                            <label>Base URL</label>
+                            <input value={settings.baseUrl} onInput={e => setSettings({...settings, baseUrl: e.target.value})} placeholder="https://..." />
+                        </div>
+                        <div className="form-group">
+                            <label>API Key</label>
+                            <input type="password" value={settings.apiKey} onInput={e => setSettings({...settings, apiKey: e.target.value})} placeholder="sk-..." />
+                        </div>
+                        <div className="form-group">
+                            <div className="model-header" style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px'}}>
+                                <label>モデル設定</label>
+                                <button className="refresh-btn" onClick={fetchModels} disabled={isLoadingModels}>
+                                    <RefreshCw size={12} className={isLoadingModels ? 'spinning' : ''} />
+                                </button>
+                            </div>
+                            
+                            {[
+                                { key: 'explain', label: 'AI解説' },
+                                { key: 'translate', label: 'AI翻訳' },
+                                { key: 'chat', label: 'チャット' }
+                            ].map(task => (
+                                <div key={task.key} className="task-model-item" style={{display:'flex', alignItems:'center', gap: '8px', marginBottom: '4px'}}>
+                                    <span style={{fontSize:'0.7rem', color:'var(--text-muted)', width:'50px'}}>{task.label}</span>
+                                    {availableModels.length > 0 ? (
+                                        <select 
+                                            style={{flex:1}}
+                                            value={settings.models?.[task.key] || ''} 
+                                            onChange={e => setSettings({
+                                                ...settings, 
+                                                models: { ...settings.models, [task.key]: e.target.value }
+                                            })}
+                                        >
+                                            <option value="">(選択...)</option>
+                                            {availableModels.map(m => (
+                                                <option key={m} value={m}>{m}</option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <input 
+                                            style={{flex:1}}
+                                            type="text" 
+                                            value={settings.models?.[task.key] || ''} 
+                                            onInput={e => setSettings({
+                                                ...settings, 
+                                                models: { ...settings.models, [task.key]: e.target.value }
+                                            })} 
+                                            placeholder="gpt-4o..."
+                                        />
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        <button className="save-btn" onClick={handleSaveSettings}><Save size={14} /> 設定を保存</button>
                     </div>
                 )}
             </div>
