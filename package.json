@@ -16,6 +16,7 @@
     "marked": "^17.0.5",
     "pdfjs-dist": "^3.4.120",
     "preact": "^10.29.0",
+    "qrcode": "^1.5.4",
     "vite-plugin-pwa": "^1.2.0"
   },
   "devDependencies": {

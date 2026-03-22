@@ -1,19 +1,9 @@
-import { storage_add, storage_get, MistNode } from '../lib/mistlib/index.js';
-
-let node = null;
+import { storage_add, storage_get } from '../lib/mistlib/index.js';
+import { getMistNode } from '../utils/mist.js';
+import { readDeviceId } from '../utils/device.js';
 
 export async function initMist() {
-    if (node) return node;
-    
-    let nodeId = localStorage.getItem('mist_node_id');
-    if (!nodeId) {
-        nodeId = "pdf-user-" + Math.random().toString(36).substr(2, 9);
-        localStorage.setItem('mist_node_id', nodeId);
-    }
-    
-    node = new MistNode(nodeId);
-    await node.init();
-    return node;
+    return await getMistNode();
 }
 
 function getFilesIndex() {

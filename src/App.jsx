@@ -1,12 +1,16 @@
-import { useState, useEffect, useCallback, useRef } from 'preact/hooks';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'preact/hooks';
 import Sidebar from './components/Sidebar';
 import PdfViewer from './components/PdfViewer';
 import Tooltip from './components/Tooltip';
 import Chat from './components/Chat';
-import { loadPdf, renamePdf } from './services/storage';
+import { loadPdf, renamePdf, getPdfList as loadPdfList } from './services/storage';
 import { extractText } from './services/pdf';
-import { explainText, translateText, getAiSettings } from './services/ai';
-import { PanelLeftClose, PanelLeftOpen, MessageCircle } from 'lucide-preact';
+import { explainText, translateText, getAiSettings, saveAiSettings } from './services/ai';
+import { PanelLeftClose, PanelLeftOpen, MessageCircle, RefreshCw } from 'lucide-preact';
+import { useSync } from './hooks/useSync';
+import { SyncPanel } from './components/SyncPanel';
+import { DiffConfirmPanel } from './components/DiffConfirmPanel';
+import { QRPanel } from './components/QRPanel';
 
 export function App() {
   const [currentPdfName, setCurrentPdfName] = useState(null);
@@ -28,6 +32,85 @@ export function App() {
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
   const [lastLang, setLastLang] = useState(localStorage.getItem('mist_last_lang') || '日本語');
+
+  const [pdfs, setPdfs] = useState([]);
+  const [customFolders, setCustomFolders] = useState(['Default']);
+
+  useEffect(() => {
+    const loadData = async () => {
+      const list = await loadPdfList();
+      setPdfs(list);
+      const savedFolders = localStorage.getItem('mist_custom_folders');
+      if (savedFolders) {
+        try {
+          const parsed = JSON.parse(savedFolders);
+          if (Array.isArray(parsed)) setCustomFolders(parsed);
+        } catch (e) {}
+      }
+    };
+    loadData();
+
+    const handleSyncUpdate = () => {
+      loadData();
+    };
+    window.addEventListener('sync-data-updated', handleSyncUpdate);
+    return () => window.removeEventListener('sync-data-updated', handleSyncUpdate);
+  }, []);
+
+  const syncState = useMemo(() => ({
+    files: pdfs,
+    explanations: JSON.parse(localStorage.getItem('mist_explanations_index') || '{}'),
+    aiSettings: getAiSettings(),
+    lastLang: lastLang,
+    lastPdf: currentPdfName,
+    customFolders: customFolders
+  }), [pdfs, lastLang, currentPdfName, customFolders]);
+
+  const [isSyncOpen, setIsSyncOpen] = useState(false);
+  const [isQrOpen, setIsQrOpen] = useState(false);
+  const [isDiffConfirmOpen, setIsDiffConfirmOpen] = useState(false);
+
+  const {
+    roomId,
+    inviteUrl,
+    status: syncStatus,
+    error: syncError,
+    acceptRemoteState,
+    setAcceptRemoteState,
+    peerCount,
+    hasRemoteStateDiff,
+    startSync,
+    copyInviteLink,
+    disconnect,
+  } = useSync({
+    state: syncState,
+    onReplaceState: (nextState) => {
+      localStorage.setItem('mist_files_index', JSON.stringify(nextState.files));
+      localStorage.setItem('mist_explanations_index', JSON.stringify(nextState.explanations));
+      saveAiSettings(nextState.aiSettings);
+      localStorage.setItem('mist_last_lang', nextState.lastLang);
+      localStorage.setItem('mist_custom_folders', JSON.stringify(nextState.customFolders));
+      
+      setLastLang(nextState.lastLang);
+      setPdfs(nextState.files);
+      setCustomFolders(nextState.customFolders);
+      
+      if (nextState.lastPdf && nextState.lastPdf !== currentPdfName) {
+        handleSelectPdf(nextState.lastPdf);
+      }
+      
+      window.dispatchEvent(new CustomEvent('sync-data-updated'));
+    },
+    isEditing: isRenaming
+  });
+
+  useEffect(() => {
+    if (syncStatus === 'connected' && hasRemoteStateDiff && !acceptRemoteState) {
+      setIsDiffConfirmOpen(true);
+    } else if (!hasRemoteStateDiff) {
+      setIsDiffConfirmOpen(false);
+    }
+  }, [syncStatus, hasRemoteStateDiff, acceptRemoteState]);
 
   const containerRef = useRef(null);
 
@@ -157,6 +240,12 @@ export function App() {
       <Sidebar
         onSelectPdf={handleSelectPdf}
         currentPdfName={currentPdfName}
+        onOpenSync={() => setIsSyncOpen(true)}
+        isSyncActive={syncStatus === 'connected' || syncStatus === 'connecting'}
+        pdfs={pdfs}
+        setPdfs={setPdfs}
+        customFolders={customFolders}
+        setCustomFolders={setCustomFolders}
       />
 
       <div
@@ -257,6 +346,37 @@ export function App() {
           lastLang={lastLang}
         />
       </main>
+
+      <SyncPanel
+        open={isSyncOpen}
+        onClose={() => setIsSyncOpen(false)}
+        roomId={roomId}
+        status={syncStatus}
+        error={syncError}
+        peerCount={peerCount}
+        onCopyInvite={copyInviteLink}
+        onStartSync={startSync}
+        onShowQR={() => setIsQrOpen(true)}
+        onDisconnect={disconnect}
+      />
+
+      <DiffConfirmPanel
+        open={isDiffConfirmOpen}
+        onAccept={() => {
+          setAcceptRemoteState(true);
+          setIsDiffConfirmOpen(false);
+        }}
+        onDisconnect={() => {
+          disconnect();
+          setIsDiffConfirmOpen(false);
+        }}
+      />
+
+      <QRPanel
+        open={isQrOpen}
+        onClose={() => setIsQrOpen(false)}
+        url={inviteUrl}
+      />
     </div>
   );
 }

@@ -3,9 +3,8 @@ import { Settings, FileUp, List, Save, RefreshCw, Folder, Download, Edit3, Trash
 import { getAiSettings, saveAiSettings, getAvailableModels, DEFAULT_MODELS } from '../services/ai';
 import { getPdfList, savePdf, renamePdf, deletePdf, updatePdfFolder, loadPdf, updatePdfList } from '../services/storage';
 
-export default function Sidebar({ onSelectPdf, currentPdfName }) {
+export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyncActive, pdfs, setPdfs, customFolders, setCustomFolders }) {
     const [view, setView] = useState('files');
-    const [pdfs, setPdfs] = useState([]);
     const [settings, setSettings] = useState(getAiSettings());
     const [isUploading, setIsUploading] = useState(false);
     const [availableModels, setAvailableModels] = useState(DEFAULT_MODELS);
@@ -15,7 +14,6 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
     const [newName, setNewName] = useState('');
     const [isAddingFolder, setIsAddingFolder] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
-    const [customFolders, setCustomFolders] = useState(['Default']);
     const [activeMenu, setActiveMenu] = useState(null);
     const [showManual, setShowManual] = useState({});
     const menuRef = useRef(null);
@@ -27,23 +25,21 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
     }, [view]);
 
     useEffect(() => {
-        loadFiles();
-        const savedFolders = localStorage.getItem('mist_custom_folders');
-        if (savedFolders) {
-            try {
-                const parsed = JSON.parse(savedFolders);
-                if (Array.isArray(parsed)) setCustomFolders(parsed);
-            } catch (e) {
-                console.error('Failed to parse custom folders:', e);
-            }
-        }
+        const handleSyncUpdate = () => {
+            setSettings(getAiSettings());
+        };
+        window.addEventListener('sync-data-updated', handleSyncUpdate);
+
         const handleClickOutside = (e) => {
             if (menuRef.current && !menuRef.current.contains(e.target)) {
                 setActiveMenu(null);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            window.removeEventListener('sync-data-updated', handleSyncUpdate);
+        }
     }, []);
 
     useEffect(() => {
@@ -114,8 +110,9 @@ export default function Sidebar({ onSelectPdf, currentPdfName }) {
             <div className="sidebar-header">
                 <h1>PDF Viewer</h1>
                 <div className="nav-icons">
-                    <button className={view === 'files' ? 'active' : ''} onClick={() => setView('files')}><List size={16} /></button>
-                    <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')}><Settings size={16} /></button>
+                    <button className={view === 'files' ? 'active' : ''} onClick={() => setView('files')} title="ファイル一覧"><List size={16} /></button>
+                    <button className={isSyncActive ? 'active' : ''} onClick={onOpenSync} title="同期設定"><RefreshCw size={16} className={isSyncActive ? 'spinning' : ''} /></button>
+                    <button className={view === 'settings' ? 'active' : ''} onClick={() => setView('settings')} title="AI設定"><Settings size={16} /></button>
                 </div>
             </div>
             <div className="sidebar-content">
