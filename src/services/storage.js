@@ -83,7 +83,6 @@ export async function prefetchPdf(name) {
     try {
         await loadPdf(name);
     } catch {
-        // best-effort: silently ignore errors
     }
 }
 

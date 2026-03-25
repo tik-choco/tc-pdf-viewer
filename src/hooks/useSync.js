@@ -65,6 +65,7 @@ export function useSync({
   isEditingRef.current = isEditing;
   
   const lastSentSignatureRef = useRef('');
+  const pendingRemoteSignatureRef = useRef(null);
   const readyToBroadcastRef = useRef(false);
   const broadcastTimerRef = useRef(null);
   const queuedSnapshotRef = useRef(null);
@@ -118,14 +119,15 @@ export function useSync({
   const makeSnapshot = useCallback((updatedAt = Date.now()) => {
     return {
       version: 1,
-      roomId,
+      roomId: activeRoomIdRef.current,
       updatedAt,
       state: stateRef.current,
     };
-  }, [roomId]);
+  }, []);
 
   const sendCurrentSnapshot = useCallback(() => {
-    if (!roomId) return;
+    const currentRoomId = activeRoomIdRef.current;
+    if (!currentRoomId) return;
     const snapshot = makeSnapshot();
     const signature = serializeState(snapshot.state);
     lastSentSignatureRef.current = signature;
@@ -133,11 +135,11 @@ export function useSync({
 
     sendMessage({
       type: 'snapshot',
-      roomId,
+      roomId: currentRoomId,
       from: deviceId,
       snapshot,
     });
-  }, [deviceId, makeSnapshot, roomId, sendMessage]);
+  }, [deviceId, makeSnapshot, sendMessage]);
 
   const flushQueuedSnapshot = useCallback(() => {
     if (!readyToBroadcastRef.current || !queuedSnapshotRef.current) return;
@@ -206,6 +208,7 @@ export function useSync({
       
       if (acceptRemoteStateRef.current) {
         if (nextStateDiff) {
+          pendingRemoteSignatureRef.current = signature;
           onReplaceStateRef.current(parsed.snapshot.state);
         }
         setHasRemoteStateDiff(false);
@@ -326,6 +329,14 @@ export function useSync({
     const signature = serializeState(state);
     if (signature === lastSentSignatureRef.current) return;
 
+    if (pendingRemoteSignatureRef.current !== null) {
+      lastSentSignatureRef.current = signature;
+      if (signature === pendingRemoteSignatureRef.current) {
+        pendingRemoteSignatureRef.current = null;
+      }
+      return;
+    }
+
     const snapshot = makeSnapshot();
     if (!readyToBroadcastRef.current) {
       queuedSnapshotRef.current = snapshot;
@@ -346,6 +357,7 @@ export function useSync({
     setAcceptRemoteStateValue((current) => {
       if (next && !current) {
         if (lastRemoteSnapshotRef.current) {
+          pendingRemoteSignatureRef.current = serializeState(lastRemoteSnapshotRef.current.state);
           onReplaceStateRef.current(lastRemoteSnapshotRef.current.state);
           setHasRemoteStateDiff(false);
         }
