@@ -205,7 +205,9 @@ export function useSync({
       setStatus('connected');
       
       if (acceptRemoteStateRef.current) {
-        onReplaceStateRef.current(parsed.snapshot.state);
+        if (nextStateDiff) {
+          onReplaceStateRef.current(parsed.snapshot.state);
+        }
         setHasRemoteStateDiff(false);
       } else {
         setHasRemoteStateDiff(nextStateDiff);

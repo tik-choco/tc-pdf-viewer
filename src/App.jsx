@@ -3,7 +3,7 @@ import Sidebar from './components/Sidebar';
 import PdfViewer from './components/PdfViewer';
 import Tooltip from './components/Tooltip';
 import Chat from './components/Chat';
-import { loadPdf, renamePdf, getPdfList as loadPdfList } from './services/storage';
+import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf } from './services/storage';
 import { extractText } from './services/pdf';
 import { explainText, translateText, getAiSettings, saveAiSettings } from './services/ai';
 import { PanelLeftClose, PanelLeftOpen, MessageCircle, RefreshCw } from 'lucide-preact';
@@ -35,6 +35,8 @@ export function App() {
 
   const [pdfs, setPdfs] = useState([]);
   const [customFolders, setCustomFolders] = useState(['Default']);
+  const [prefetchProgress, setPrefetchProgress] = useState(null); // null | { done, total, complete }
+  const lastPrefetchSignatureRef = useRef('');
 
   useEffect(() => {
     const loadData = async () => {
@@ -94,11 +96,35 @@ export function App() {
       setLastLang(nextState.lastLang);
       setPdfs(nextState.files);
       setCustomFolders(nextState.customFolders);
-      
+
+      // バックグラウンドで全PDFをprefetch（non-blocking、重複スキップ）
+      const filesToFetch = nextState.files ?? [];
+      if (filesToFetch.length > 0) {
+        const signature = filesToFetch.map(f => f.cid).join(',');
+        if (signature !== lastPrefetchSignatureRef.current) {
+          lastPrefetchSignatureRef.current = signature;
+          const total = filesToFetch.length;
+          setPrefetchProgress({ done: 0, total, complete: false });
+          filesToFetch.forEach(f => {
+            prefetchPdf(f.name).finally(() => {
+              setPrefetchProgress(prev => {
+                if (!prev) return null;
+                const done = prev.done + 1;
+                if (done >= total) {
+                  setTimeout(() => setPrefetchProgress(null), 2000);
+                  return { done, total, complete: true };
+                }
+                return { done, total, complete: false };
+              });
+            });
+          });
+        }
+      }
+
       if (nextState.lastPdf && nextState.lastPdf !== currentPdfName) {
         handleSelectPdf(nextState.lastPdf);
       }
-      
+
       window.dispatchEvent(new CustomEvent('sync-data-updated'));
     },
     isEditing: isRenaming
@@ -155,12 +181,9 @@ export function App() {
         setIsTooltipVisible(false);
         const text = await extractText(data);
         setPdfContent(text);
-      } else {
-        alert('PDFの読み込みに失敗しました');
       }
     } catch (err) {
-      console.error(err);
-      alert('エラーが発生しました: ' + err.message);
+      console.error('PDF load error:', err);
     } finally {
       setTimeout(() => {
         setIsPdfMasking(false);
@@ -377,6 +400,15 @@ export function App() {
         onClose={() => setIsQrOpen(false)}
         url={inviteUrl}
       />
+
+      {prefetchProgress && (
+        <div className={`prefetch-toast ${prefetchProgress.complete ? 'complete' : ''}`}>
+          <RefreshCw size={13} className={prefetchProgress.complete ? '' : 'spinning'} />
+          {prefetchProgress.complete
+            ? `PDF同期完了 (${prefetchProgress.total}件)`
+            : `PDFを同期中 ${prefetchProgress.done}/${prefetchProgress.total}`}
+        </div>
+      )}
     </div>
   );
 }

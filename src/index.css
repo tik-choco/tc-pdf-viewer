@@ -998,6 +998,36 @@ select option {
   animation: spin 1s linear infinite;
 }
 
+.prefetch-toast {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(30, 41, 59, 0.95);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  border-radius: 20px;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  backdrop-filter: blur(8px);
+  z-index: 9999;
+  pointer-events: none;
+  animation: toast-in 0.2s ease;
+}
+
+.prefetch-toast.complete {
+  color: #34d399;
+  border-color: rgba(52, 211, 153, 0.4);
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
 @keyframes spin {
   from {
     transform: rotate(0deg);

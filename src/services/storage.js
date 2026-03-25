@@ -71,12 +71,20 @@ export async function loadPdf(name) {
     await initMist();
     const index = getFilesIndex();
     const file = index.find(f => f.name === name);
-    
+
     if (!file || !file.cid) {
         throw new Error(`CID not found locally for PDF: ${name}`);
     }
 
     return await storage_get(file.cid);
+}
+
+export async function prefetchPdf(name) {
+    try {
+        await loadPdf(name);
+    } catch {
+        // best-effort: silently ignore errors
+    }
 }
 
 export async function saveExplanation(text, explanation) {
