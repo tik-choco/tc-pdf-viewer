@@ -1728,6 +1728,23 @@ select option {
   margin-bottom: 8px;
 }
 
+.markdown-body a {
+  color: #7dd3fc;
+  text-decoration: underline;
+  text-decoration-color: rgba(125, 211, 252, 0.55);
+  text-underline-offset: 2px;
+}
+
+.markdown-body a:visited {
+  color: #c4b5fd;
+  text-decoration-color: rgba(196, 181, 253, 0.55);
+}
+
+.markdown-body a:hover {
+  color: #bae6fd;
+  text-decoration-color: currentColor;
+}
+
 .markdown-body>*:last-child {
   margin-bottom: 0 !important;
   padding-bottom: 0 !important;
