@@ -1,20 +1,15 @@
 ﻿import { getExplanation, saveExplanation } from './storage';
 
-export const DEFAULT_MODELS = [
-    'gpt-4o',
-    'gpt-4o-mini',
-    'gpt-4-turbo',
-    'gpt-3.5-turbo'
-];
+export const DEFAULT_MODELS = [];
 
 const DEFAULT_SETTINGS = {
     baseUrl: 'https://api.openai.com/v1',
     apiKey: '',
     models: {
-        explain: 'gpt-4o',
-        translate: 'gpt-4o',
-        chat: 'gpt-4o',
-        ocr: 'gpt-4o'
+        explain: '',
+        translate: '',
+        chat: '',
+        ocr: ''
     },
     promptTemplate: '以下の用語や文章を簡潔に、かつ専門的に解説してください:\n\n"{text}"',
     targetLanguages: ['日本語', 'English', '中国語', '韓国語', 'スペイン語']
@@ -79,16 +74,97 @@ export async function translateText(text, targetLanguage = '日本語') {
     return await chatAi([{ role: 'user', content: prompt }], 'translate');
 }
 
-export async function translateMarkdown(markdown, targetLanguage = '日本語') {
+const MARKDOWN_TRANSLATION_CHUNK_SIZE = 4500;
+const MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE = 1200;
+
+export async function translateMarkdown(markdown, targetLanguage = '日本語', onProgress = null) {
+    const chunks = splitMarkdownForTranslation(markdown);
+    const translatedChunks = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+        onProgress?.({ done: translatedChunks.length, total: chunks.length });
+
+        try {
+            const translated = await translateMarkdownChunk(chunks[i], targetLanguage, {
+                chunkNumber: i + 1,
+                totalChunks: chunks.length
+            });
+            translatedChunks.push(translated.trim());
+            onProgress?.({ done: translatedChunks.length, total: chunks.length });
+        } catch (err) {
+            if (!isTimeoutError(err) || chunks[i].length <= MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE) {
+                throw err;
+            }
+
+            const smallerChunks = splitMarkdownForTranslation(
+                chunks[i],
+                Math.max(MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE, Math.floor(chunks[i].length / 2))
+            );
+            if (smallerChunks.length <= 1 && smallerChunks[0] === chunks[i]) {
+                throw err;
+            }
+            chunks.splice(i, 1, ...smallerChunks);
+            i -= 1;
+        }
+    }
+
+    return translatedChunks.join('\n\n');
+}
+
+async function translateMarkdownChunk(markdown, targetLanguage, { chunkNumber = 1, totalChunks = 1 } = {}) {
     const prompt = [
-        `Translate the following Markdown document into ${targetLanguage}.`,
+        `Translate the following Markdown document chunk into ${targetLanguage}.`,
+        `This is chunk ${chunkNumber} of ${totalChunks}; translate only this chunk.`,
         'Preserve the Markdown structure, headings, lists, tables, code fences, links, page comments, and reading order.',
-        'Translate prose and table text. Do not summarize. Do not add commentary outside the translated Markdown.',
+        'Translate prose and table text. Do not translate code inside code fences. Do not summarize. Do not add commentary outside the translated Markdown.',
         '',
         markdown
     ].join('\n');
 
     return await chatAi([{ role: 'user', content: prompt }], 'translate');
+}
+
+function splitMarkdownForTranslation(markdown, maxChars = MARKDOWN_TRANSLATION_CHUNK_SIZE) {
+    if (!markdown || markdown.length <= maxChars) return [markdown || ''];
+
+    const chunks = [];
+    const lines = markdown.split('\n');
+    let current = [];
+    let currentLength = 0;
+    let inFence = false;
+
+    const flush = () => {
+        if (!current.length) return;
+        chunks.push(current.join('\n'));
+        current = [];
+        currentLength = 0;
+    };
+
+    for (const line of lines) {
+        const lineLength = line.length + 1;
+        const isFenceLine = /^\s*(```|~~~)/.test(line);
+        const isBoundary = line.trim() === '' || /^#{1,6}\s+/.test(line) || /^<!--\s*Page\s+\d+\s*-->$/.test(line.trim());
+
+        if (!inFence && currentLength + lineLength > maxChars && isBoundary) {
+            flush();
+        } else if (!inFence && currentLength > maxChars) {
+            flush();
+        }
+
+        current.push(line);
+        currentLength += lineLength;
+
+        if (isFenceLine) {
+            inFence = !inFence;
+        }
+    }
+
+    flush();
+    return chunks.filter(chunk => chunk.trim().length > 0);
+}
+
+function isTimeoutError(err) {
+    return err?.name === 'AbortError' || /タイムアウト|timeout/i.test(err?.message || '');
 }
 export async function chatAi(messages, task = 'chat') {
     const settings = getAiSettings();
@@ -97,7 +173,8 @@ export async function chatAi(messages, task = 'chat') {
     const baseUrl = (settings.baseUrl || '').replace(/\/$/, '');
     if (!baseUrl) throw new Error('AI Base URLが設定されていません。');
 
-    const model = settings.models?.[task] || settings.models?.chat || 'gpt-4o';
+    const model = settings.models?.[task] || settings.models?.chat;
+    if (!model) throw new Error('AIモデルが設定されていません。AI設定でモデルを選択してください。');
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
 
@@ -167,8 +244,8 @@ export async function ocrImagesToMarkdown(images, { fileName = 'document.pdf' } 
     return await chatAi([{ role: 'user', content }], 'ocr');
 }
 
-export async function getAvailableModels() {
-    const settings = getAiSettings();
+export async function getAvailableModels(settingsOverride = null) {
+    const settings = settingsOverride || getAiSettings();
     if (!settings.apiKey) return [];
 
     // Ensure baseUrl has no trailing slash and isn't empty
@@ -198,6 +275,40 @@ export async function getAvailableModels() {
             console.error('This is likely a CORS or Mixed Content (HTTPS to HTTP) error. Check your API endpoint and browser console.');
         }
         return [];
+    }
+}
+
+export async function testAiConnection(settingsOverride = null) {
+    const settings = settingsOverride || getAiSettings();
+    if (!settings.apiKey) throw new Error('APIキーが設定されていません。');
+
+    const baseUrl = (settings.baseUrl || '').replace(/\/$/, '');
+    if (!baseUrl) throw new Error('AI Base URLが設定されていません。');
+
+    const url = `${baseUrl}/models`;
+    try {
+        const response = await fetch(url, {
+            headers: {
+                'Authorization': `Bearer ${settings.apiKey}`
+            }
+        });
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            const msg = error.error?.message || `${response.status} ${response.statusText}`;
+            throw new Error(`API応答エラー: ${msg}`);
+        }
+
+        const data = await response.json();
+        return {
+            ok: true,
+            modelCount: Array.isArray(data.data) ? data.data.length : 0
+        };
+    } catch (err) {
+        if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+            throw new Error('APIに到達できません。Base URL、ネットワーク、CORS、Mixed Content（HTTPSページからHTTP API）を確認してください。');
+        }
+        throw err;
     }
 }
 

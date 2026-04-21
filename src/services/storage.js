@@ -31,6 +31,14 @@ function saveOcrMarkdownIndex(index) {
     localStorage.setItem('mist_ocr_markdown_index', JSON.stringify(index));
 }
 
+function getTranslatedMarkdownIndex() {
+    return JSON.parse(localStorage.getItem('mist_translated_markdown_index') || '{}');
+}
+
+function saveTranslatedMarkdownIndex(index) {
+    localStorage.setItem('mist_translated_markdown_index', JSON.stringify(index));
+}
+
 export async function savePdf(name, data) {
     await initMist();
     const cid = await storage_add(name, data);
@@ -55,6 +63,13 @@ export async function renamePdf(oldName, newName) {
             saveOcrMarkdownIndex(ocrIndex);
         }
 
+        const translatedIndex = getTranslatedMarkdownIndex();
+        if (translatedIndex[oldName] && !translatedIndex[newName]) {
+            translatedIndex[newName] = translatedIndex[oldName];
+            delete translatedIndex[oldName];
+            saveTranslatedMarkdownIndex(translatedIndex);
+        }
+
         return true;
     }
     return false;
@@ -69,6 +84,12 @@ export async function deletePdf(name) {
     if (ocrIndex[name]) {
         delete ocrIndex[name];
         saveOcrMarkdownIndex(ocrIndex);
+    }
+
+    const translatedIndex = getTranslatedMarkdownIndex();
+    if (translatedIndex[name]) {
+        delete translatedIndex[name];
+        saveTranslatedMarkdownIndex(translatedIndex);
     }
 }
 
@@ -165,4 +186,45 @@ export async function getOcrMarkdown(pdfName) {
 
 export function getOcrMarkdownIndexSnapshot() {
     return getOcrMarkdownIndex();
+}
+
+export async function saveTranslatedMarkdown(pdfName, targetLanguage, markdown) {
+    if (!pdfName) throw new Error('PDF name is required to save translated Markdown.');
+    if (!targetLanguage) throw new Error('Target language is required to save translated Markdown.');
+
+    await initMist();
+    const safeLanguage = targetLanguage.replace(/[\\/:*?"<>|]/g, '_');
+    const cid = await storage_add(`${pdfName}.${safeLanguage}.translated.md`, new TextEncoder().encode(markdown));
+
+    const index = getTranslatedMarkdownIndex();
+    index[pdfName] = {
+        ...(index[pdfName] || {}),
+        [targetLanguage]: {
+            cid,
+            updatedAt: Date.now(),
+        },
+    };
+    saveTranslatedMarkdownIndex(index);
+    return cid;
+}
+
+export async function getTranslatedMarkdown(pdfName, targetLanguage) {
+    if (!pdfName || !targetLanguage) return null;
+
+    await initMist();
+    const index = getTranslatedMarkdownIndex();
+    const entry = index[pdfName]?.[targetLanguage];
+    const cid = typeof entry === 'string' ? entry : entry?.cid;
+    if (!cid) return null;
+
+    try {
+        const data = await storage_get(cid);
+        return new TextDecoder().decode(data);
+    } catch (e) {
+        return null;
+    }
+}
+
+export function getTranslatedMarkdownIndexSnapshot() {
+    return getTranslatedMarkdownIndex();
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'preact/hooks';
-import { Settings, FileUp, List, Save, RefreshCw, Folder, Download, Edit3, Trash2, ChevronRight, ChevronDown, Plus, FolderPlus, Move, Check, X, MoreVertical } from 'lucide-preact';
-import { getAiSettings, saveAiSettings, getAvailableModels, DEFAULT_MODELS } from '../services/ai';
+import { Settings, FileUp, List, RefreshCw, Folder, Download, Edit3, Trash2, ChevronRight, ChevronDown, Plus, FolderPlus, Move, Check, X, MoreVertical } from 'lucide-preact';
+import { getAiSettings, saveAiSettings, getAvailableModels, testAiConnection, DEFAULT_MODELS } from '../services/ai';
 import { getPdfList, savePdf, renamePdf, deletePdf, updatePdfFolder, loadPdf, updatePdfList } from '../services/storage';
 
 export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyncActive, pdfs, setPdfs, customFolders, setCustomFolders }) {
@@ -9,13 +9,15 @@ export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyn
     const [isUploading, setIsUploading] = useState(false);
     const [availableModels, setAvailableModels] = useState(DEFAULT_MODELS);
     const [isLoadingModels, setIsLoadingModels] = useState(false);
+    const [connectionStatus, setConnectionStatus] = useState('');
+    const [connectionError, setConnectionError] = useState('');
+    const [isTestingConnection, setIsTestingConnection] = useState(false);
     const [expandedFolders, setExpandedFolders] = useState(['Default']);
     const [editingFile, setEditingFile] = useState(null);
     const [newName, setNewName] = useState('');
     const [isAddingFolder, setIsAddingFolder] = useState(false);
     const [newFolderName, setNewFolderName] = useState('');
     const [activeMenu, setActiveMenu] = useState(null);
-    const [showManual, setShowManual] = useState({});
     const menuRef = useRef(null);
 
     useEffect(() => {
@@ -58,9 +60,33 @@ export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyn
 
     const fetchModels = async () => {
         setIsLoadingModels(true);
-        const models = await getAvailableModels();
+        const models = await getAvailableModels(settings);
         setAvailableModels(models);
         setIsLoadingModels(false);
+    };
+
+    const updateSettings = (nextSettings) => {
+        setSettings(nextSettings);
+        saveAiSettings(nextSettings);
+        window.dispatchEvent(new CustomEvent('sync-data-updated'));
+    };
+
+    const handleTestConnection = async () => {
+        setIsTestingConnection(true);
+        setConnectionStatus('Testing API connection...');
+        setConnectionError('');
+
+        try {
+            const result = await testAiConnection(settings);
+            setConnectionStatus(`Connected. ${result.modelCount} models available.`);
+            const models = await getAvailableModels(settings);
+            if (models.length) setAvailableModels(models);
+        } catch (err) {
+            setConnectionStatus('Connection failed');
+            setConnectionError(err.message || String(err));
+        } finally {
+            setIsTestingConnection(false);
+        }
     };
 
     const handleUpload = async (e, folderName) => {
@@ -83,11 +109,6 @@ export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyn
         localStorage.setItem('mist_custom_folders', JSON.stringify(newList));
         setExpandedFolders(prev => [...prev, newFolderName]);
         setNewFolderName(''); setIsAddingFolder(false);
-    };
-
-    const handleSaveSettings = () => {
-        saveAiSettings(settings);
-        setView('files');
     };
 
     const handleRename = async (oldName) => {
@@ -279,11 +300,22 @@ export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyn
                         <h3>AI 設定</h3>
                         <div className="form-group">
                             <label htmlFor="ai-base-url">Base URL</label>
-                            <input id="ai-base-url" name="ai-base-url" value={settings.baseUrl} onInput={e => setSettings({ ...settings, baseUrl: e.target.value })} placeholder="https://..." autoComplete="off" />
+                            <input id="ai-base-url" name="ai-base-url" value={settings.baseUrl} onInput={e => updateSettings({ ...settings, baseUrl: e.target.value })} placeholder="https://..." autoComplete="off" />
                         </div>
                         <div className="form-group">
                             <label htmlFor="ai-api-key">API Key</label>
-                            <input id="ai-api-key" name="ai-api-key" type="password" value={settings.apiKey} onInput={e => setSettings({ ...settings, apiKey: e.target.value })} placeholder="sk-..." autoComplete="off" />
+                            <input id="ai-api-key" name="ai-api-key" type="password" value={settings.apiKey} onInput={e => updateSettings({ ...settings, apiKey: e.target.value })} placeholder="sk-..." autoComplete="off" />
+                        </div>
+                        <div className="form-group">
+                            <button className="save-btn" onClick={handleTestConnection} disabled={isTestingConnection}>
+                                <RefreshCw size={14} className={isTestingConnection ? 'spinning' : ''} />
+                                API接続テスト
+                            </button>
+                            {(connectionStatus || connectionError) && (
+                                <div className="settings-test-result">
+                                    <span className={connectionError ? 'error' : ''}>{connectionError || connectionStatus}</span>
+                                </div>
+                            )}
                         </div>
                         <div className="form-group">
                             <div className="model-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
@@ -300,43 +332,11 @@ export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyn
                                 { key: 'ocr', label: 'OCR' }
                             ].map(task => {
                                 const currentModel = settings.models?.[task.key] || '';
-                                const isManual = showManual[task.key] || (currentModel && !(availableModels || []).includes(currentModel) && !(DEFAULT_MODELS || []).includes(currentModel));
-
-                                if (isManual) {
-                                    return (
-                                        <div key={task.key} className="task-model-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                                            <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)', width: '50px' }}>{task.label}</span>
-                                            <input
-                                                id={`model-${task.key}`}
-                                                name={`model-${task.key}`}
-                                                style={{ flex: 1 }}
-                                                type="text"
-                                                value={currentModel}
-                                                onInput={e => setSettings({
-                                                    ...settings,
-                                                    models: { ...settings.models, [task.key]: e.target.value }
-                                                })}
-                                                placeholder="モデル名を入力..."
-                                                autoComplete="off"
-                                                autoFocus
-                                            />
-                                            <button 
-                                                className="refresh-btn" 
-                                                onClick={() => setShowManual({ ...showManual, [task.key]: false })}
-                                                title="リストから選択"
-                                                style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 4 }}
-                                            >
-                                                <List size={14} />
-                                            </button>
-                                        </div>
-                                    );
-                                }
-
                                 const modelOptions = Array.from(new Set([
                                     ...DEFAULT_MODELS,
-                                    ...availableModels,
-                                    ...(currentModel ? [currentModel] : [])
+                                    ...availableModels
                                 ])).sort();
+                                const selectedModel = modelOptions.includes(currentModel) ? currentModel : '';
 
                                 return (
                                     <div key={task.key} className="task-model-item" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
@@ -345,16 +345,12 @@ export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyn
                                             id={`select-model-${task.key}`}
                                             name={`select-model-${task.key}`}
                                             style={{ flex: 1 }}
-                                            value={currentModel}
+                                            value={selectedModel}
                                             onChange={e => {
-                                                if (e.target.value === '__custom__') {
-                                                    setShowManual({ ...showManual, [task.key]: true });
-                                                } else {
-                                                    setSettings({
-                                                        ...settings,
-                                                        models: { ...settings.models, [task.key]: e.target.value }
-                                                    });
-                                                }
+                                                updateSettings({
+                                                    ...settings,
+                                                    models: { ...settings.models, [task.key]: e.target.value }
+                                                });
                                             }}
                                             autoComplete="off"
                                         >
@@ -362,13 +358,11 @@ export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyn
                                             {modelOptions.map(m => (
                                                 <option key={m} value={m}>{m}</option>
                                             ))}
-                                            <option value="__custom__">+ 手動入力...</option>
                                         </select>
                                     </div>
                                 );
                             })}
                         </div>
-                        <button className="save-btn" onClick={handleSaveSettings}><Save size={14} /> 設定を保存</button>
                     </div>
                 )}
             </div>

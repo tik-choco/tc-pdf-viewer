@@ -437,6 +437,18 @@ select option {
   transform: translateY(-1px);
 }
 
+.settings-test-result {
+  margin-top: 8px;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.settings-test-result .error {
+  color: #f87171;
+}
+
 .chat-panel {
   width: var(--chat-width, 350px);
   background: var(--bg-sidebar);

@@ -4,7 +4,7 @@ import PdfViewer from './components/PdfViewer';
 import MarkdownViewer from './components/MarkdownViewer';
 import Tooltip from './components/Tooltip';
 import Chat from './components/Chat';
-import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, getOcrMarkdown, getOcrMarkdownIndexSnapshot } from './services/storage';
+import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot } from './services/storage';
 import { extractText, renderPdfPagesToImages } from './services/pdf';
 import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown } from './services/ai';
 import { PanelLeftClose, PanelLeftOpen, MessageCircle, RefreshCw, FileText } from 'lucide-preact';
@@ -47,6 +47,7 @@ export function App() {
   const [pdfs, setPdfs] = useState([]);
   const [customFolders, setCustomFolders] = useState(['Default']);
   const [ocrMarkdownIndex, setOcrMarkdownIndex] = useState({});
+  const [translatedMarkdownIndex, setTranslatedMarkdownIndex] = useState({});
   const [prefetchProgress, setPrefetchProgress] = useState(null); // null | { done, total, complete }
   const lastPrefetchSignatureRef = useRef('');
 
@@ -55,6 +56,7 @@ export function App() {
       const list = await loadPdfList();
       setPdfs(list);
       setOcrMarkdownIndex(getOcrMarkdownIndexSnapshot());
+      setTranslatedMarkdownIndex(getTranslatedMarkdownIndexSnapshot());
       const savedFolders = localStorage.getItem('mist_custom_folders');
       if (savedFolders) {
         try {
@@ -76,11 +78,12 @@ export function App() {
     files: pdfs,
     explanations: JSON.parse(localStorage.getItem('mist_explanations_index') || '{}'),
     ocrMarkdown: ocrMarkdownIndex,
+    translatedMarkdown: translatedMarkdownIndex,
     aiSettings: getAiSettings(),
     lastLang: lastLang,
     lastPdf: currentPdfName,
     customFolders: customFolders
-  }), [pdfs, ocrMarkdownIndex, lastLang, currentPdfName, customFolders]);
+  }), [pdfs, ocrMarkdownIndex, translatedMarkdownIndex, lastLang, currentPdfName, customFolders]);
 
   const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [isQrOpen, setIsQrOpen] = useState(false);
@@ -104,6 +107,7 @@ export function App() {
       localStorage.setItem('mist_files_index', JSON.stringify(nextState.files));
       localStorage.setItem('mist_explanations_index', JSON.stringify(nextState.explanations));
       localStorage.setItem('mist_ocr_markdown_index', JSON.stringify(nextState.ocrMarkdown || {}));
+      localStorage.setItem('mist_translated_markdown_index', JSON.stringify(nextState.translatedMarkdown || {}));
       saveAiSettings(nextState.aiSettings);
       localStorage.setItem('mist_last_lang', nextState.lastLang);
       localStorage.setItem('mist_custom_folders', JSON.stringify(nextState.customFolders));
@@ -111,6 +115,7 @@ export function App() {
       setLastLang(nextState.lastLang);
       setPdfs(nextState.files);
       setOcrMarkdownIndex(nextState.ocrMarkdown || {});
+      setTranslatedMarkdownIndex(nextState.translatedMarkdown || {});
       setCustomFolders(nextState.customFolders);
 
       // 繝舌ャ繧ｯ繧ｰ繝ｩ繧ｦ繝ｳ繝峨〒蜈ｨPDF繧恥refetch・・on-blocking縲・㍾隍・せ繧ｭ繝・・・・
@@ -209,6 +214,12 @@ export function App() {
           setOcrMarkdown(savedMarkdown);
           setOcrStatus('菫晏ｭ俶ｸ医∩Markdown');
           setHasSavedOcrMarkdown(true);
+        }
+
+        const savedTranslation = await getTranslatedMarkdown(name, lastLang);
+        if (savedTranslation) {
+          setTranslatedMarkdown(savedTranslation);
+          setMarkdownTranslateStatus(`Loaded ${lastLang} translation`);
         }
       }
     } catch (err) {
@@ -352,8 +363,20 @@ export function App() {
     localStorage.setItem('mist_last_lang', targetLanguage);
 
     try {
-      const translated = await translateMarkdown(ocrMarkdown, targetLanguage);
+      const savedTranslation = await getTranslatedMarkdown(currentPdfName, targetLanguage);
+      if (savedTranslation) {
+        setTranslatedMarkdown(savedTranslation);
+        setMarkdownTranslateStatus(`Loaded ${targetLanguage} translation`);
+        return;
+      }
+
+      const translated = await translateMarkdown(ocrMarkdown, targetLanguage, ({ done, total }) => {
+        setMarkdownTranslateStatus(`Translating to ${targetLanguage}... ${done}/${total}`);
+      });
       setTranslatedMarkdown(translated);
+      await saveTranslatedMarkdown(currentPdfName, targetLanguage, translated);
+      setTranslatedMarkdownIndex(getTranslatedMarkdownIndexSnapshot());
+      window.dispatchEvent(new CustomEvent('sync-data-updated'));
       setMarkdownTranslateStatus(`Translated to ${targetLanguage}`);
     } catch (err) {
       setMarkdownTranslateError(err.message || String(err));
