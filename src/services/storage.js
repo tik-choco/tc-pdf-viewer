@@ -23,6 +23,14 @@ function saveFileToIndex(name, cid) {
     localStorage.setItem('mist_files_index', JSON.stringify(index));
 }
 
+function getOcrMarkdownIndex() {
+    return JSON.parse(localStorage.getItem('mist_ocr_markdown_index') || '{}');
+}
+
+function saveOcrMarkdownIndex(index) {
+    localStorage.setItem('mist_ocr_markdown_index', JSON.stringify(index));
+}
+
 export async function savePdf(name, data) {
     await initMist();
     const cid = await storage_add(name, data);
@@ -39,6 +47,14 @@ export async function renamePdf(oldName, newName) {
         file.name = newName;
         file.updatedAt = Date.now();
         localStorage.setItem('mist_files_index', JSON.stringify(index));
+
+        const ocrIndex = getOcrMarkdownIndex();
+        if (ocrIndex[oldName] && !ocrIndex[newName]) {
+            ocrIndex[newName] = ocrIndex[oldName];
+            delete ocrIndex[oldName];
+            saveOcrMarkdownIndex(ocrIndex);
+        }
+
         return true;
     }
     return false;
@@ -48,6 +64,12 @@ export async function deletePdf(name) {
     const index = getFilesIndex();
     const newIndex = index.filter(f => f.name !== name);
     localStorage.setItem('mist_files_index', JSON.stringify(newIndex));
+
+    const ocrIndex = getOcrMarkdownIndex();
+    if (ocrIndex[name]) {
+        delete ocrIndex[name];
+        saveOcrMarkdownIndex(ocrIndex);
+    }
 }
 
 export async function updatePdfFolder(name, folder) {
@@ -107,4 +129,40 @@ export async function getExplanation(text) {
     } catch (e) {
         return null;
     }
+}
+
+export async function saveOcrMarkdown(pdfName, markdown) {
+    if (!pdfName) throw new Error('PDF name is required to save OCR Markdown.');
+
+    await initMist();
+    const cid = await storage_add(`${pdfName}.ocr.md`, new TextEncoder().encode(markdown));
+
+    const index = getOcrMarkdownIndex();
+    index[pdfName] = {
+        cid,
+        updatedAt: Date.now(),
+    };
+    saveOcrMarkdownIndex(index);
+    return cid;
+}
+
+export async function getOcrMarkdown(pdfName) {
+    if (!pdfName) return null;
+
+    await initMist();
+    const index = getOcrMarkdownIndex();
+    const entry = index[pdfName];
+    const cid = typeof entry === 'string' ? entry : entry?.cid;
+    if (!cid) return null;
+
+    try {
+        const data = await storage_get(cid);
+        return new TextDecoder().decode(data);
+    } catch (e) {
+        return null;
+    }
+}
+
+export function getOcrMarkdownIndexSnapshot() {
+    return getOcrMarkdownIndex();
 }

@@ -296,7 +296,8 @@ export default function Sidebar({ onSelectPdf, currentPdfName, onOpenSync, isSyn
                             {[
                                 { key: 'explain', label: 'AI解説' },
                                 { key: 'translate', label: 'AI翻訳' },
-                                { key: 'chat', label: 'チャット' }
+                                { key: 'chat', label: 'チャット' },
+                                { key: 'ocr', label: 'OCR' }
                             ].map(task => {
                                 const currentModel = settings.models?.[task.key] || '';
                                 const isManual = showManual[task.key] || (currentModel && !(availableModels || []).includes(currentModel) && !(DEFAULT_MODELS || []).includes(currentModel));

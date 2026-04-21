@@ -13,7 +13,8 @@ const DEFAULT_SETTINGS = {
     models: {
         explain: 'gpt-4o',
         translate: 'gpt-4o',
-        chat: 'gpt-4o'
+        chat: 'gpt-4o',
+        ocr: 'gpt-4o'
     },
     promptTemplate: '以下の用語や文章を簡潔に、かつ専門的に解説してください:\n\n"{text}"',
     targetLanguages: ['日本語', 'English', '中国語', '韓国語', 'スペイン語']
@@ -125,6 +126,35 @@ export async function chatAi(messages, task = 'chat') {
         }
         throw err;
     }
+}
+
+export async function ocrImagesToMarkdown(images, { fileName = 'document.pdf' } = {}) {
+    if (!images?.length) throw new Error('OCR対象の画像がありません。');
+
+    const content = [
+        {
+            type: 'text',
+            text: [
+                `The attached images are pages from "${fileName}".`,
+                'Perform OCR on every visible page and convert the result to clean Markdown.',
+                'Preserve headings, paragraphs, lists, tables, captions, page breaks, and reading order as accurately as possible.',
+                'Do not summarize. Do not add commentary. If text is uncertain, mark it with [?].',
+                'Insert a Markdown comment before each page in the form: <!-- Page N -->.'
+            ].join('\n')
+        },
+        ...images.flatMap(image => ([
+            { type: 'text', text: `Page ${image.pageNumber}` },
+            {
+                type: 'image_url',
+                image_url: {
+                    url: image.dataUrl,
+                    detail: 'high'
+                }
+            }
+        ]))
+    ];
+
+    return await chatAi([{ role: 'user', content }], 'ocr');
 }
 
 export async function getAvailableModels() {
