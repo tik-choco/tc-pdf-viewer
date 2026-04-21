@@ -1,4 +1,4 @@
-import { getExplanation, saveExplanation } from './storage';
+﻿import { getExplanation, saveExplanation } from './storage';
 
 export const DEFAULT_MODELS = [
     'gpt-4o',
@@ -75,11 +75,21 @@ export async function explainText(text) {
 }
 
 export async function translateText(text, targetLanguage = '日本語') {
-    const settings = getAiSettings();
-    const prompt = `以下の文章を自然な「${targetLanguage}」に翻訳してください。専門用語が含まれる場合は、その文脈に即した適切な訳語を使用してください:\n\n"${text}"`;
+    const prompt = `以下の文章を自然な「${targetLanguage}」に翻訳してください。専門用語が含まれる場合は、その分野に即した適切な訳語を使用してください:\n\n"${text}"`;
     return await chatAi([{ role: 'user', content: prompt }], 'translate');
 }
 
+export async function translateMarkdown(markdown, targetLanguage = '日本語') {
+    const prompt = [
+        `Translate the following Markdown document into ${targetLanguage}.`,
+        'Preserve the Markdown structure, headings, lists, tables, code fences, links, page comments, and reading order.',
+        'Translate prose and table text. Do not summarize. Do not add commentary outside the translated Markdown.',
+        '',
+        markdown
+    ].join('\n');
+
+    return await chatAi([{ role: 'user', content: prompt }], 'translate');
+}
 export async function chatAi(messages, task = 'chat') {
     const settings = getAiSettings();
     if (!settings.apiKey) throw new Error('APIキーが設定されていません。');
@@ -190,3 +200,4 @@ export async function getAvailableModels() {
         return [];
     }
 }
+

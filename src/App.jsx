@@ -6,7 +6,7 @@ import Tooltip from './components/Tooltip';
 import Chat from './components/Chat';
 import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, getOcrMarkdown, getOcrMarkdownIndexSnapshot } from './services/storage';
 import { extractText, renderPdfPagesToImages } from './services/pdf';
-import { explainText, translateText, getAiSettings, saveAiSettings, ocrImagesToMarkdown } from './services/ai';
+import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown } from './services/ai';
 import { PanelLeftClose, PanelLeftOpen, MessageCircle, RefreshCw, FileText } from 'lucide-preact';
 import { useSync } from './hooks/useSync';
 import { SyncPanel } from './components/SyncPanel';
@@ -33,6 +33,10 @@ export function App() {
   const [ocrStatus, setOcrStatus] = useState('');
   const [ocrError, setOcrError] = useState('');
   const [hasSavedOcrMarkdown, setHasSavedOcrMarkdown] = useState(false);
+  const [translatedMarkdown, setTranslatedMarkdown] = useState('');
+  const [markdownTranslateStatus, setMarkdownTranslateStatus] = useState('');
+  const [markdownTranslateError, setMarkdownTranslateError] = useState('');
+  const [isMarkdownTranslating, setIsMarkdownTranslating] = useState(false);
 
   const [tooltipText, setTooltipText] = useState(null);
   const [lastHoverText, setLastHoverText] = useState(null);
@@ -189,6 +193,9 @@ export function App() {
     setOcrStatus('');
     setOcrError('');
     setHasSavedOcrMarkdown(false);
+    setTranslatedMarkdown('');
+    setMarkdownTranslateStatus('');
+    setMarkdownTranslateError('');
     localStorage.setItem('mist_last_pdf', name);
     try {
       const data = await loadPdf(name);
@@ -332,6 +339,27 @@ export function App() {
     } catch (err) {
       setOcrError(err.message || String(err));
       setOcrStatus('Save failed');
+    }
+  };
+
+  const handleTranslateMarkdown = async (targetLanguage) => {
+    if (!ocrMarkdown || isMarkdownTranslating) return;
+
+    setMarkdownTranslateError('');
+    setMarkdownTranslateStatus(`Translating to ${targetLanguage}...`);
+    setIsMarkdownTranslating(true);
+    setLastLang(targetLanguage);
+    localStorage.setItem('mist_last_lang', targetLanguage);
+
+    try {
+      const translated = await translateMarkdown(ocrMarkdown, targetLanguage);
+      setTranslatedMarkdown(translated);
+      setMarkdownTranslateStatus(`Translated to ${targetLanguage}`);
+    } catch (err) {
+      setMarkdownTranslateError(err.message || String(err));
+      setMarkdownTranslateStatus('Translation failed');
+    } finally {
+      setIsMarkdownTranslating(false);
     }
   };
 
@@ -503,6 +531,13 @@ export function App() {
                   onSave={saveCurrentOcrMarkdown}
                   onCopy={copyOcrMarkdown}
                   onDownload={downloadOcrMarkdown}
+                  translatedMarkdown={translatedMarkdown}
+                  translationStatus={markdownTranslateStatus}
+                  translationError={markdownTranslateError}
+                  isTranslating={isMarkdownTranslating}
+                  targetLanguage={lastLang}
+                  targetLanguages={getAiSettings().targetLanguages || ['日本語', 'English']}
+                  onTranslate={handleTranslateMarkdown}
                 />
               </div>
             )}
