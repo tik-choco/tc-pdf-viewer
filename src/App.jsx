@@ -353,7 +353,7 @@ export function App() {
     }
   };
 
-  const handleTranslateMarkdown = async (targetLanguage) => {
+  const handleTranslateMarkdown = async (targetLanguage, { force = false } = {}) => {
     if (!ocrMarkdown || isMarkdownTranslating) return;
 
     setMarkdownTranslateError('');
@@ -363,11 +363,13 @@ export function App() {
     localStorage.setItem('mist_last_lang', targetLanguage);
 
     try {
-      const savedTranslation = await getTranslatedMarkdown(currentPdfName, targetLanguage);
-      if (savedTranslation) {
-        setTranslatedMarkdown(savedTranslation);
-        setMarkdownTranslateStatus(`Loaded ${targetLanguage} translation`);
-        return;
+      if (!force) {
+        const savedTranslation = await getTranslatedMarkdown(currentPdfName, targetLanguage);
+        if (savedTranslation) {
+          setTranslatedMarkdown(savedTranslation);
+          setMarkdownTranslateStatus(`Loaded ${targetLanguage} translation`);
+          return;
+        }
       }
 
       setTranslatedMarkdown('');

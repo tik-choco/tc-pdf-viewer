@@ -35,6 +35,11 @@ export default function MarkdownViewer({
         onTranslate?.(selectedLanguage);
     };
 
+    const handleRegenerateTranslation = () => {
+        setMode('compare');
+        onTranslate?.(selectedLanguage, { force: true });
+    };
+
     return (
         <div className="markdown-viewer-container">
             <div className="viewer-toolbar markdown-toolbar">
@@ -82,6 +87,14 @@ export default function MarkdownViewer({
                     <button className="toolbar-text-btn" onClick={handleTranslate} disabled={!markdown || busy} title="Translate Markdown">
                         {isTranslating ? <RefreshCw size={15} className="spinning" /> : <Languages size={15} />}
                         Translate
+                    </button>
+                    <button
+                        className="toolbar-btn"
+                        onClick={handleRegenerateTranslation}
+                        disabled={!markdown || !translatedMarkdown || busy}
+                        title="Regenerate translation"
+                    >
+                        <RefreshCw size={15} />
                     </button>
 
                     <button className="toolbar-btn" onClick={onRunOcr} disabled={!hasPdf || busy} title="Re-run OCR">

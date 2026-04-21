@@ -76,50 +76,98 @@ export async function translateText(text, targetLanguage = '日本語') {
 
 const MARKDOWN_TRANSLATION_CHUNK_SIZE = 4500;
 const MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE = 1200;
+const MARKDOWN_TRANSLATION_CONCURRENCY = 2;
 
 export async function translateMarkdown(markdown, targetLanguage = '日本語', onProgress = null) {
     const chunks = splitMarkdownForTranslation(markdown);
-    const translatedChunks = [];
+    const translatedChunks = Array(chunks.length).fill('');
+    const completedChunks = Array(chunks.length).fill(false);
+    let completed = 0;
+    let nextIndex = 0;
+    let failed = false;
 
     const notifyProgress = () => {
+        const visibleChunks = [];
+        for (let i = 0; i < translatedChunks.length; i++) {
+            if (!translatedChunks[i] && !completedChunks[i]) break;
+            visibleChunks.push(translatedChunks[i]);
+            if (!completedChunks[i]) break;
+        }
+
         onProgress?.({
-            done: translatedChunks.length,
+            done: completed,
             total: chunks.length,
-            translatedMarkdown: translatedChunks.join('\n\n')
+            translatedMarkdown: visibleChunks.join('\n\n')
         });
     };
 
-    for (let i = 0; i < chunks.length; i++) {
-        notifyProgress();
+    const translateNextChunk = async () => {
+        while (!failed && nextIndex < chunks.length) {
+            const index = nextIndex;
+            nextIndex += 1;
 
-        try {
-            const translated = await translateMarkdownChunk(chunks[i], targetLanguage, {
-                chunkNumber: i + 1,
-                totalChunks: chunks.length
-            });
-            translatedChunks.push(translated.trim());
-            notifyProgress();
-        } catch (err) {
-            if (!isTimeoutError(err) || chunks[i].length <= MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE) {
+            try {
+                const translated = await translateMarkdownChunkWithRetry(chunks[index], targetLanguage, {
+                    chunkNumber: index + 1,
+                    totalChunks: chunks.length,
+                    onPartial: (partial) => {
+                        translatedChunks[index] = partial;
+                        notifyProgress();
+                    }
+                });
+                translatedChunks[index] = translated.trim();
+                completedChunks[index] = true;
+                completed += 1;
+                notifyProgress();
+            } catch (err) {
+                failed = true;
                 throw err;
             }
-
-            const smallerChunks = splitMarkdownForTranslation(
-                chunks[i],
-                Math.max(MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE, Math.floor(chunks[i].length / 2))
-            );
-            if (smallerChunks.length <= 1 && smallerChunks[0] === chunks[i]) {
-                throw err;
-            }
-            chunks.splice(i, 1, ...smallerChunks);
-            i -= 1;
         }
-    }
+    };
 
-    return translatedChunks.join('\n\n');
+    notifyProgress();
+    const workerCount = Math.min(MARKDOWN_TRANSLATION_CONCURRENCY, chunks.length);
+    await Promise.all(Array.from({ length: workerCount }, () => translateNextChunk()));
+
+    return translatedChunks.map(chunk => chunk.trim()).join('\n\n');
 }
 
-async function translateMarkdownChunk(markdown, targetLanguage, { chunkNumber = 1, totalChunks = 1 } = {}) {
+async function translateMarkdownChunkWithRetry(markdown, targetLanguage, { chunkNumber = 1, totalChunks = 1, onPartial = null } = {}) {
+    try {
+        return await translateMarkdownChunk(markdown, targetLanguage, { chunkNumber, totalChunks, onPartial });
+    } catch (err) {
+        if (!isTimeoutError(err) || markdown.length <= MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE) {
+            throw err;
+        }
+
+        const smallerChunks = splitMarkdownForTranslation(
+            markdown,
+            Math.max(MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE, Math.floor(markdown.length / 2))
+        );
+        if (smallerChunks.length <= 1 && smallerChunks[0] === markdown) {
+            throw err;
+        }
+
+        const translatedChunks = [];
+        onPartial?.('');
+        for (let i = 0; i < smallerChunks.length; i++) {
+            const translated = await translateMarkdownChunkWithRetry(smallerChunks[i], targetLanguage, {
+                chunkNumber: `${chunkNumber}.${i + 1}`,
+                totalChunks,
+                onPartial: (partial) => {
+                    const nextChunks = [...translatedChunks, partial];
+                    onPartial(nextChunks.join('\n\n'));
+                }
+            });
+            translatedChunks.push(translated.trim());
+            onPartial?.(translatedChunks.join('\n\n'));
+        }
+        return translatedChunks.join('\n\n');
+    }
+}
+
+async function translateMarkdownChunk(markdown, targetLanguage, { chunkNumber = 1, totalChunks = 1, onPartial = null } = {}) {
     const prompt = [
         `Translate the following Markdown document chunk into ${targetLanguage}.`,
         `This is chunk ${chunkNumber} of ${totalChunks}; translate only this chunk.`,
@@ -129,7 +177,11 @@ async function translateMarkdownChunk(markdown, targetLanguage, { chunkNumber = 
         markdown
     ].join('\n');
 
-    return await chatAi([{ role: 'user', content: prompt }], 'translate');
+    return await chatAi([{ role: 'user', content: prompt }], 'translate', {
+        stream: true,
+        timeoutMs: 120000,
+        onDelta: (_delta, content) => onPartial?.(content)
+    });
 }
 
 function splitMarkdownForTranslation(markdown, maxChars = MARKDOWN_TRANSLATION_CHUNK_SIZE) {
@@ -174,7 +226,7 @@ function splitMarkdownForTranslation(markdown, maxChars = MARKDOWN_TRANSLATION_C
 function isTimeoutError(err) {
     return err?.name === 'AbortError' || /タイムアウト|timeout/i.test(err?.message || '');
 }
-export async function chatAi(messages, task = 'chat') {
+export async function chatAi(messages, task = 'chat', options = {}) {
     const settings = getAiSettings();
     if (!settings.apiKey) throw new Error('APIキーが設定されていません。');
 
@@ -184,7 +236,7 @@ export async function chatAi(messages, task = 'chat') {
     const model = settings.models?.[task] || settings.models?.chat;
     if (!model) throw new Error('AIモデルが設定されていません。AI設定でモデルを選択してください。');
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), options.timeoutMs || 30000);
 
     const url = `${baseUrl}/chat/completions`;
     try {
@@ -197,19 +249,26 @@ export async function chatAi(messages, task = 'chat') {
             },
             body: JSON.stringify({
                 model: model,
-                messages: messages
+                messages: messages,
+                ...(options.stream ? { stream: true } : {})
             })
         });
 
-        clearTimeout(timeoutId);
-
         if (!response.ok) {
+            clearTimeout(timeoutId);
             const error = await response.json().catch(() => ({}));
             const msg = error.error?.message || `APIリクエストに失敗しました: ${response.status} ${response.statusText}`;
             console.error(`AI Error from ${url}:`, msg);
             throw new Error(msg);
         }
 
+        if (options.stream) {
+            const result = await readChatCompletionStream(response, options.onDelta);
+            clearTimeout(timeoutId);
+            return result.trim();
+        }
+
+        clearTimeout(timeoutId);
         const data = await response.json();
         return data.choices[0].message.content.trim();
     } catch (err) {
@@ -284,6 +343,53 @@ export async function getAvailableModels(settingsOverride = null) {
         }
         return [];
     }
+}
+
+async function readChatCompletionStream(response, onDelta = null) {
+    if (!response.body) throw new Error('ストリーミングレスポンスを読み取れません。');
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let content = '';
+
+    const handleEvent = (eventText) => {
+        const dataLines = eventText
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.startsWith('data:'))
+            .map(line => line.slice(5).trim());
+
+        for (const data of dataLines) {
+            if (!data || data === '[DONE]') continue;
+
+            const payload = JSON.parse(data);
+            const delta = payload.choices?.[0]?.delta?.content || '';
+            if (!delta) continue;
+
+            content += delta;
+            onDelta?.(delta, content);
+        }
+    };
+
+    while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() || '';
+        for (const eventText of events) {
+            handleEvent(eventText);
+        }
+    }
+
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+        handleEvent(buffer);
+    }
+
+    return content;
 }
 
 export async function testAiConnection(settingsOverride = null) {
