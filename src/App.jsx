@@ -370,7 +370,9 @@ export function App() {
         return;
       }
 
-      const translated = await translateMarkdown(ocrMarkdown, targetLanguage, ({ done, total }) => {
+      setTranslatedMarkdown('');
+      const translated = await translateMarkdown(ocrMarkdown, targetLanguage, ({ done, total, translatedMarkdown }) => {
+        setTranslatedMarkdown(translatedMarkdown);
         setMarkdownTranslateStatus(`Translating to ${targetLanguage}... ${done}/${total}`);
       });
       setTranslatedMarkdown(translated);

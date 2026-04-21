@@ -81,8 +81,16 @@ export async function translateMarkdown(markdown, targetLanguage = '日本語', 
     const chunks = splitMarkdownForTranslation(markdown);
     const translatedChunks = [];
 
+    const notifyProgress = () => {
+        onProgress?.({
+            done: translatedChunks.length,
+            total: chunks.length,
+            translatedMarkdown: translatedChunks.join('\n\n')
+        });
+    };
+
     for (let i = 0; i < chunks.length; i++) {
-        onProgress?.({ done: translatedChunks.length, total: chunks.length });
+        notifyProgress();
 
         try {
             const translated = await translateMarkdownChunk(chunks[i], targetLanguage, {
@@ -90,7 +98,7 @@ export async function translateMarkdown(markdown, targetLanguage = '日本語', 
                 totalChunks: chunks.length
             });
             translatedChunks.push(translated.trim());
-            onProgress?.({ done: translatedChunks.length, total: chunks.length });
+            notifyProgress();
         } catch (err) {
             if (!isTimeoutError(err) || chunks[i].length <= MARKDOWN_TRANSLATION_MIN_RETRY_CHUNK_SIZE) {
                 throw err;
