@@ -1941,6 +1941,18 @@ select option {
   font-weight: 700;
 }
 
+.markdown-body .katex {
+  color: var(--text-main);
+  font-size: 1em;
+}
+
+.markdown-body .katex-display {
+  margin: 12px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
+}
+
 @keyframes spinning {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }

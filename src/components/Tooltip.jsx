@@ -1,9 +1,7 @@
 import { useEffect, useState, useRef } from 'preact/hooks';
 import { Sparkles, X, Copy, Check, Languages, ChevronDown } from 'lucide-preact';
-import { Marked } from 'marked';
 import { getAiSettings } from '../services/ai';
-
-const marked = new Marked();
+import { renderMarkdown } from '../utils/markdown';
 
 export default function Tooltip({ text, currentTerm, position, isVisible, onClose, onRequestExplanation, onRequestTranslation, onSwitchLanguage, lastLang }) {
   const tooltipRef = useRef(null);
@@ -25,7 +23,7 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
 
   useEffect(() => {
     if (text && text !== 'loading') {
-      setHtmlContent(marked.parse(text));
+      setHtmlContent(renderMarkdown(text));
     } else {
       setHtmlContent('');
     }

@@ -1,8 +1,6 @@
 import { useMemo, useState } from 'preact/hooks';
 import { Check, Copy, Download, Edit3, Eye, FileText, Languages, RefreshCw, Save } from 'lucide-preact';
-import { Marked } from 'marked';
-
-const marked = new Marked();
+import { renderMarkdown } from '../utils/markdown';
 
 export default function MarkdownViewer({
     fileName,
@@ -26,8 +24,8 @@ export default function MarkdownViewer({
 }) {
     const [mode, setMode] = useState('preview');
     const [selectedLanguage, setSelectedLanguage] = useState(targetLanguage);
-    const html = useMemo(() => marked.parse(markdown || ''), [markdown]);
-    const translatedHtml = useMemo(() => marked.parse(translatedMarkdown || ''), [translatedMarkdown]);
+    const html = useMemo(() => renderMarkdown(markdown), [markdown]);
+    const translatedHtml = useMemo(() => renderMarkdown(translatedMarkdown), [translatedMarkdown]);
     const busy = isRunning || isTranslating;
 
     const handleTranslate = () => {

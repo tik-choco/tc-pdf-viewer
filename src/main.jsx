@@ -1,5 +1,6 @@
 import { render } from 'preact';
 import { App } from './App.jsx';
+import 'katex/dist/katex.min.css';
 import './index.css';
 
 // Register PWA service worker

@@ -1,9 +1,7 @@
 import { useState, useRef, useEffect } from 'preact/hooks';
 import { Send, Trash2, User, Bot, Loader2, Copy, Check } from 'lucide-preact';
 import { chatAi } from '../services/ai';
-import { Marked } from 'marked';
-
-const marked = new Marked();
+import { renderMarkdown } from '../utils/markdown';
 
 const MessageItem = ({ m }) => {
     const [copied, setCopied] = useState(false);
@@ -35,7 +33,7 @@ const MessageItem = ({ m }) => {
                 )}
                 <div
                     className="msg-bubble markdown-body"
-                    dangerouslySetInnerHTML={{ __html: marked.parse(m.content) }}
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
                 />
             </div>
         </div>
@@ -149,7 +147,7 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, on
                             )}
                             <div
                                 className="msg-bubble markdown-body"
-                                dangerouslySetInnerHTML={{ __html: marked.parse(m.content) }}
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content) }}
                             />
                         </div>
                     </div>
