@@ -70,8 +70,12 @@ export async function explainText(text) {
 }
 
 export async function translateText(text, targetLanguage = '日本語') {
-    const prompt = `以下の文章を自然な「${targetLanguage}」に翻訳してください。専門用語が含まれる場合は、その分野に即した適切な訳語を使用してください:\n\n"${text}"`;
-    return await chatAi([{ role: 'user', content: prompt }], 'translate');
+    const prompt = [
+        `Translate into ${targetLanguage}. Output only the translation.`,
+        '',
+        text
+    ].join('\n');
+    return await chatAi(buildTranslationMessages(prompt, targetLanguage), 'translate');
 }
 
 const MARKDOWN_TRANSLATION_CHUNK_SIZE = 4500;
@@ -169,19 +173,28 @@ async function translateMarkdownChunkWithRetry(markdown, targetLanguage, { chunk
 
 async function translateMarkdownChunk(markdown, targetLanguage, { chunkNumber = 1, totalChunks = 1, onPartial = null } = {}) {
     const prompt = [
-        `Translate the following Markdown document chunk into ${targetLanguage}.`,
-        `This is chunk ${chunkNumber} of ${totalChunks}; translate only this chunk.`,
-        'Preserve the Markdown structure, headings, lists, tables, code fences, links, page comments, and reading order.',
-        'Translate prose and table text. Do not translate code inside code fences. Do not summarize. Do not add commentary outside the translated Markdown.',
+        `Translate this Markdown chunk into ${targetLanguage}. Chunk ${chunkNumber}/${totalChunks}.`,
+        'Preserve Markdown. Translate prose and table text. Do not translate code fences.',
+        'Output only the translated Markdown.',
         '',
         markdown
     ].join('\n');
 
-    return await chatAi([{ role: 'user', content: prompt }], 'translate', {
+    return await chatAi(buildTranslationMessages(prompt, targetLanguage), 'translate', {
         stream: true,
         timeoutMs: 120000,
         onDelta: (_delta, content) => onPartial?.(content)
     });
+}
+
+function buildTranslationMessages(prompt, targetLanguage) {
+    return [
+        {
+            role: 'system',
+            content: `Translate into ${targetLanguage}. Return only the translation; no source text, bilingual pairs, or commentary.`
+        },
+        { role: 'user', content: prompt }
+    ];
 }
 
 function splitMarkdownForTranslation(markdown, maxChars = MARKDOWN_TRANSLATION_CHUNK_SIZE) {
