@@ -303,10 +303,11 @@ export async function ocrImagesToMarkdown(images, { fileName = 'document.pdf' } 
             type: 'text',
             text: [
                 `The attached images are pages from "${fileName}".`,
-                'Perform OCR on every visible page and convert the result to clean Markdown.',
-                'Preserve headings, paragraphs, lists, tables, captions, page breaks, and reading order as accurately as possible.',
-                'Do not summarize. Do not add commentary. If text is uncertain, mark it with [?].',
-                'Insert a Markdown comment before each page in the form: <!-- Page N -->.'
+                'OCR every visible page and return raw Markdown only.',
+                'Recreate the document structure with Markdown headings, paragraphs, lists, tables, captions, and page breaks.',
+                'Preserve reading order and all visible text. Do not summarize, explain, or add commentary.',
+                'Do not wrap the output in code fences.',
+                'Mark uncertain text with [?]. Insert <!-- Page N --> before each page.'
             ].join('\n')
         },
         ...images.flatMap(image => ([
