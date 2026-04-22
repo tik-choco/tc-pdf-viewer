@@ -1,9 +1,12 @@
 ﻿import { getExplanation, saveExplanation } from './storage';
 
 export const DEFAULT_MODELS = [];
+const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
 const DEFAULT_SETTINGS = {
-    baseUrl: 'https://api.openai.com/v1',
+    baseUrl: DEFAULT_BASE_URL,
+    baseUrls: [DEFAULT_BASE_URL],
+    baseUrlConfigs: [{ label: 'OpenAI', url: DEFAULT_BASE_URL, apiKey: '' }],
     apiKey: '',
     models: {
         explain: '',
@@ -11,9 +14,94 @@ const DEFAULT_SETTINGS = {
         chat: '',
         ocr: ''
     },
+    modelBaseUrls: {
+        explain: DEFAULT_BASE_URL,
+        translate: DEFAULT_BASE_URL,
+        chat: DEFAULT_BASE_URL,
+        ocr: DEFAULT_BASE_URL
+    },
     promptTemplate: '以下の用語や文章を簡潔に、かつ専門的に解説してください:\n\n"{text}"',
     targetLanguages: ['日本語', 'English', '中国語', '韓国語', 'スペイン語']
 };
+
+function normalizeBaseUrl(baseUrl) {
+    return (baseUrl || '').trim().replace(/\/$/, '');
+}
+
+function defaultBaseUrlLabel(baseUrl) {
+    try {
+        return new URL(baseUrl).host || baseUrl;
+    } catch {
+        return baseUrl;
+    }
+}
+
+function getBaseUrlList(settings) {
+    const urls = [
+        ...(Array.isArray(settings?.baseUrls) ? settings.baseUrls : []),
+        ...(Array.isArray(settings?.baseUrlConfigs) ? settings.baseUrlConfigs.map((config) => config?.url) : []),
+        settings?.baseUrl,
+    ]
+        .map(normalizeBaseUrl)
+        .filter(Boolean);
+
+    return Array.from(new Set(urls));
+}
+
+function getBaseUrlConfigs(settings) {
+    const configsByUrl = new Map();
+
+    if (Array.isArray(settings?.baseUrlConfigs)) {
+        settings.baseUrlConfigs.forEach((config) => {
+            const url = normalizeBaseUrl(config?.url);
+            if (!url) return;
+            const label = (config?.label || '').trim();
+            const hasOwnApiKey = Object.prototype.hasOwnProperty.call(config, 'apiKey');
+            const existing = configsByUrl.get(url);
+            configsByUrl.set(url, {
+                label: label || existing?.label || defaultBaseUrlLabel(url),
+                url,
+                apiKey: hasOwnApiKey ? (config.apiKey || '') : (existing?.apiKey || settings?.apiKey || ''),
+            });
+        });
+    }
+
+    getBaseUrlList(settings).forEach((url) => {
+        if (configsByUrl.has(url)) return;
+        configsByUrl.set(url, {
+            label: defaultBaseUrlLabel(url),
+            url,
+            apiKey: settings?.apiKey || '',
+        });
+    });
+
+    return Array.from(configsByUrl.values());
+}
+
+function normalizeAiSettings(settings) {
+    const merged = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+    const baseUrlConfigs = getBaseUrlConfigs(merged);
+    const baseUrls = baseUrlConfigs.map((config) => config.url);
+    const fallbackBaseUrl = baseUrls[0] || DEFAULT_BASE_URL;
+    const baseUrl = baseUrls.includes(normalizeBaseUrl(merged.baseUrl))
+        ? normalizeBaseUrl(merged.baseUrl)
+        : fallbackBaseUrl;
+    const modelBaseUrls = { ...DEFAULT_SETTINGS.modelBaseUrls, ...merged.modelBaseUrls };
+
+    Object.keys(DEFAULT_SETTINGS.models).forEach((task) => {
+        const taskBaseUrl = normalizeBaseUrl(modelBaseUrls[task]);
+        modelBaseUrls[task] = baseUrls.includes(taskBaseUrl) ? taskBaseUrl : baseUrl;
+    });
+
+    return {
+        ...merged,
+        baseUrl,
+        baseUrls,
+        baseUrlConfigs,
+        models: { ...DEFAULT_SETTINGS.models, ...merged.models },
+        modelBaseUrls
+    };
+}
 
 export function getAiSettings() {
     const savedString = localStorage.getItem('ai_settings');
@@ -36,12 +124,32 @@ export function getAiSettings() {
         };
         delete saved.model;
     }
-    
-    return { ...DEFAULT_SETTINGS, ...saved, models: { ...DEFAULT_SETTINGS.models, ...saved.models } };
+
+    return normalizeAiSettings(saved);
 }
 
 export function saveAiSettings(settings) {
-    localStorage.setItem('ai_settings', JSON.stringify(settings));
+    localStorage.setItem('ai_settings', JSON.stringify(normalizeAiSettings(settings)));
+}
+
+export function getRegisteredBaseUrls(settingsOverride = null) {
+    return getBaseUrlList(settingsOverride || getAiSettings());
+}
+
+export function getRegisteredBaseUrlConfigs(settingsOverride = null) {
+    return getBaseUrlConfigs(settingsOverride || getAiSettings());
+}
+
+function getBaseUrlForTask(settings, task = 'chat') {
+    const normalized = normalizeAiSettings(settings);
+    return normalized.modelBaseUrls?.[task] || normalized.baseUrl;
+}
+
+function getApiKeyForBaseUrl(settings, baseUrl) {
+    const normalized = normalizeAiSettings(settings);
+    const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+    const config = normalized.baseUrlConfigs.find((item) => item.url === normalizedBaseUrl);
+    return config?.apiKey || normalized.apiKey || '';
 }
 
 const explanationCache = new Map();
@@ -241,10 +349,12 @@ function isTimeoutError(err) {
 }
 export async function chatAi(messages, task = 'chat', options = {}) {
     const settings = getAiSettings();
-    if (!settings.apiKey) throw new Error('APIキーが設定されていません。');
 
-    const baseUrl = (settings.baseUrl || '').replace(/\/$/, '');
+    const baseUrl = getBaseUrlForTask(settings, task);
     if (!baseUrl) throw new Error('AI Base URLが設定されていません。');
+
+    const apiKey = getApiKeyForBaseUrl(settings, baseUrl);
+    if (!apiKey) throw new Error('APIキーが設定されていません。');
 
     const model = settings.models?.[task] || settings.models?.chat;
     if (!model) throw new Error('AIモデルが設定されていません。AI設定でモデルを選択してください。');
@@ -258,7 +368,7 @@ export async function chatAi(messages, task = 'chat', options = {}) {
             signal: controller.signal,
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${settings.apiKey}`
+                'Authorization': `Bearer ${apiKey}`
             },
             body: JSON.stringify({
                 model: model,
@@ -327,20 +437,21 @@ export async function ocrImagesToMarkdown(images, { fileName = 'document.pdf' } 
 
 export async function getAvailableModels(settingsOverride = null) {
     const settings = settingsOverride || getAiSettings();
-    if (!settings.apiKey) return [];
 
-    // Ensure baseUrl has no trailing slash and isn't empty
-    const baseUrl = (settings.baseUrl || '').replace(/\/$/, '');
+    const baseUrl = normalizeBaseUrl(settings.baseUrl);
     if (!baseUrl) {
         console.warn('AI Base URL is empty. Please set it in settings.');
         return [];
     }
 
+    const apiKey = getApiKeyForBaseUrl(settings, baseUrl);
+    if (!apiKey) return [];
+
     const url = `${baseUrl}/models`;
     try {
         const response = await fetch(url, {
             headers: {
-                'Authorization': `Bearer ${settings.apiKey}`
+                'Authorization': `Bearer ${apiKey}`
             }
         });
         if (!response.ok) {
@@ -408,16 +519,18 @@ async function readChatCompletionStream(response, onDelta = null) {
 
 export async function testAiConnection(settingsOverride = null) {
     const settings = settingsOverride || getAiSettings();
-    if (!settings.apiKey) throw new Error('APIキーが設定されていません。');
 
-    const baseUrl = (settings.baseUrl || '').replace(/\/$/, '');
+    const baseUrl = normalizeBaseUrl(settings.baseUrl);
     if (!baseUrl) throw new Error('AI Base URLが設定されていません。');
+
+    const apiKey = getApiKeyForBaseUrl(settings, baseUrl);
+    if (!apiKey) throw new Error('APIキーが設定されていません。');
 
     const url = `${baseUrl}/models`;
     try {
         const response = await fetch(url, {
             headers: {
-                'Authorization': `Bearer ${settings.apiKey}`
+                'Authorization': `Bearer ${apiKey}`
             }
         });
 
