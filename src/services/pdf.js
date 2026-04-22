@@ -1,4 +1,5 @@
 import * as pdfjs from 'pdfjs-dist';
+import { pdfJsAssetUrls } from './pdfAssets';
 
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.js',
@@ -7,7 +8,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 
 export async function extractText(pdfBuffer, maxPages = 10) {
   try {
-    const loadingTask = pdfjs.getDocument({ data: clonePdfData(pdfBuffer) });
+    const loadingTask = pdfjs.getDocument(getPdfDocumentParams(pdfBuffer));
     const pdf = await loadingTask.promise;
     let fullText = '';
     
@@ -42,7 +43,7 @@ export async function renderPdfPagesToImages(
     onProgress,
   } = {}
 ) {
-  const loadingTask = pdfjs.getDocument({ data: clonePdfData(pdfBuffer) });
+  const loadingTask = pdfjs.getDocument(getPdfDocumentParams(pdfBuffer));
   const pdf = await loadingTask.promise;
   const pageCount = Math.min(pdf.numPages, maxPages);
   const images = [];
@@ -72,4 +73,12 @@ export async function renderPdfPagesToImages(
   }
 
   return images;
+}
+
+function getPdfDocumentParams(pdfBuffer) {
+  return {
+    data: clonePdfData(pdfBuffer),
+    cMapUrl: pdfJsAssetUrls.cMapUrl,
+    cMapPacked: true,
+  };
 }

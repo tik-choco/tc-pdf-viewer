@@ -1,7 +1,8 @@
-import { useState, useMemo, useCallback } from 'preact/hooks';
+import { useState, useMemo, useCallback, useEffect } from 'preact/hooks';
 import { Viewer, Worker, SpecialZoomLevel } from '@react-pdf-viewer/core';
 import { zoomPlugin } from '@react-pdf-viewer/zoom';
 import { Download } from 'lucide-preact';
+import { pdfJsAssetUrls } from '../services/pdfAssets';
 
 import '@react-pdf-viewer/core/lib/styles/index.css';
 import '@react-pdf-viewer/zoom/lib/styles/index.css';
@@ -24,8 +25,11 @@ export default function PdfViewer({ pdfData, fileName, onHoverText }) {
     });
     const { ZoomIn, ZoomOut, Zoom } = zoomPluginInstance;
 
-    useMemo(() => {
-        if (!pdfData) return;
+    useEffect(() => {
+        if (!pdfData) {
+            setFileUrl(null);
+            return;
+        }
         const blob = new Blob([pdfData], { type: 'application/pdf' });
         const url = URL.createObjectURL(blob);
         setFileUrl(url);
@@ -86,6 +90,10 @@ export default function PdfViewer({ pdfData, fileName, onHoverText }) {
                         theme="dark"
                         plugins={[zoomPluginInstance]}
                         defaultScale={SpecialZoomLevel.PageWidth}
+                        characterMap={{
+                            url: pdfJsAssetUrls.cMapUrl,
+                            isCompressed: true,
+                        }}
                     />
                 </div>
             </Worker>
