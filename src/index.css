@@ -1850,7 +1850,7 @@ select option {
 /* Markdown Body overrides for dark theme */
 .markdown-body {
   color: var(--text-main);
-  font-size: 0.85rem;
+  font-size: inherit;
   line-height: 1.5;
 }
 
@@ -1891,18 +1891,18 @@ select option {
 }
 
 .markdown-body h1 {
-  font-size: 1.05rem;
+  font-size: 1.25em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   padding-bottom: 4px;
   color: var(--accent);
 }
 
 .markdown-body h2 {
-  font-size: 0.95rem;
+  font-size: 1.12em;
 }
 
 .markdown-body h3 {
-  font-size: 0.85rem;
+  font-size: 1em;
 }
 
 .markdown-body ul,
