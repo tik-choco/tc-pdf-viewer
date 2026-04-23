@@ -1143,6 +1143,7 @@ select option {
   padding: 28px 0 56px;
   font-size: var(--markdown-document-font-size, 0.95rem);
   line-height: 1.7;
+  overflow-x: hidden;
 }
 
 .markdown-compare {
@@ -1938,17 +1939,20 @@ select option {
 
 .markdown-body table {
   width: 100%;
+  max-width: 100%;
   border-collapse: collapse;
   margin-bottom: 12px;
   font-size: var(--markdown-table-font-size, 0.75rem);
   display: block;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
   white-space: nowrap;
 }
 
 .markdown-body table th,
 .markdown-body table td {
-  white-space: normal;
+  white-space: nowrap;
 }
 
 .markdown-body th,
@@ -1956,9 +1960,9 @@ select option {
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 8px 12px;
   text-align: left;
-  word-break: break-word;
-  overflow-wrap: break-word;
-  line-break: strict;
+  word-break: normal;
+  overflow-wrap: normal;
+  line-break: auto;
 }
 
 .markdown-body td:first-child,
