@@ -995,6 +995,39 @@ select option {
   flex-shrink: 0;
 }
 
+.markdown-zoom-controls {
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.22);
+  color: var(--text-muted);
+}
+
+.markdown-zoom-controls .toolbar-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.markdown-zoom-value {
+  min-width: 44px;
+  height: 26px;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.markdown-zoom-value:hover {
+  color: var(--text-main);
+  background: rgba(255, 255, 255, 0.1);
+}
+
 .toolbar-btn {
   width: 30px;
   height: 30px;
@@ -1076,6 +1109,11 @@ select option {
   background: rgba(255, 255, 255, 0.1);
 }
 
+.segmented-control button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .markdown-status-bar {
   min-height: 32px;
   padding: 6px 14px;
@@ -1096,13 +1134,14 @@ select option {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  outline: none;
 }
 
-.markdown-document {
+.markdown-document.markdown-body {
   width: min(920px, calc(100% - 32px));
   margin: 0 auto;
   padding: 28px 0 56px;
-  font-size: 0.95rem;
+  font-size: var(--markdown-document-font-size, 0.95rem);
   line-height: 1.7;
 }
 
@@ -1150,7 +1189,7 @@ select option {
   background: rgba(0, 0, 0, 0.22);
   color: var(--text-main);
   padding: 18px;
-  font-size: 0.88rem;
+  font-size: var(--markdown-editor-font-size, 0.88rem);
   line-height: 1.55;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -1901,7 +1940,7 @@ select option {
   width: 100%;
   border-collapse: collapse;
   margin-bottom: 12px;
-  font-size: 0.75rem;
+  font-size: var(--markdown-table-font-size, 0.75rem);
   display: block;
   overflow-x: auto;
   white-space: nowrap;
