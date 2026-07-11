@@ -7,7 +7,7 @@ import Chat from './components/Chat';
 import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, saveOcrMarkdownSummary, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot } from './services/storage';
 import { scheduleDriveExport } from './services/driveExport';
 import { extractText, renderPdfPagesToImages } from './services/pdf';
-import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown, summarizeOcrMarkdown } from './services/ai';
+import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown, summarizeOcrMarkdown, getNetworkRoomId } from './services/ai';
 import { PanelLeftClose, PanelLeftOpen, MessageCircle, RefreshCw, FileText, X } from 'lucide-preact';
 import { useSync } from './hooks/useSync';
 import { useNetworkConsumerConnection } from './hooks/useNetworkConsumerConnection';
@@ -15,6 +15,8 @@ import { useNetworkProvider } from './hooks/useNetworkProvider';
 import { SyncPanel } from './components/SyncPanel';
 import { DiffConfirmPanel } from './components/DiffConfirmPanel';
 import { QRPanel } from './components/QRPanel';
+import { Onboarding } from './components/Onboarding';
+import { shouldShowOnboarding, markOnboardingDone, subscribeOnboardingRequests } from './services/onboarding';
 
 const PREFETCH_CONCURRENCY = 3;
 const AI_JOB_RETENTION_MS = 8000;
@@ -122,6 +124,15 @@ export function App() {
   const [aiJobs, setAiJobs] = useState([]);
   const [markdownModeRequest, setMarkdownModeRequest] = useState({ mode: 'preview', id: 0 });
 
+  // 初回起動ウィザード: 新規ユーザーのみ表示 + 設定から再表示可
+  const [showOnboarding, setShowOnboarding] = useState(() => shouldShowOnboarding());
+  useEffect(() => subscribeOnboardingRequests(() => setShowOnboarding(true)), []);
+
+  function closeOnboarding() {
+    markOnboardingDone();
+    setShowOnboarding(false);
+  }
+
   const [tooltipText, setTooltipText] = useState(null);
   const [lastHoverText, setLastHoverText] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
@@ -181,6 +192,9 @@ export function App() {
   }, []);
 
   const currentAiSettings = getAiSettings();
+  // Room ID now lives in the shared tc-shared-llm-config-v1 key, not in this
+  // app's local ai settings (see services/ai.js getNetworkRoomId).
+  const networkRoomId = getNetworkRoomId();
 
   const syncState = useMemo(() => ({
     files: pdfs,
@@ -199,11 +213,11 @@ export function App() {
   // and hooks/useNetworkProvider.js.
   useNetworkConsumerConnection({
     backend: currentAiSettings.backend,
-    roomId: currentAiSettings.mistllmRoomId,
+    roomId: networkRoomId,
   });
   useNetworkProvider({
     networkProviderEnabled: currentAiSettings.networkProviderEnabled,
-    mistllmRoomId: currentAiSettings.mistllmRoomId,
+    roomId: networkRoomId,
   });
 
   const [isSyncOpen, setIsSyncOpen] = useState(false);
@@ -1235,6 +1249,8 @@ export function App() {
             : `PDF繧貞酔譛滉ｸｭ ${prefetchProgress.done}/${prefetchProgress.total}`}
         </div>
       )}
+
+      {showOnboarding && <Onboarding onClose={closeOnboarding} />}
     </div>
   );
 }

@@ -1,52 +1,60 @@
 import { useEffect, useState } from 'preact/hooks';
-import { Plus, RefreshCw, Trash2 } from 'lucide-preact';
+import { Plus, RefreshCw, Sparkles, Star, Trash2 } from 'lucide-preact';
 import {
-    DEFAULT_MODELS,
     REASONING_EFFORT_OPTIONS,
+    AI_TASKS,
     getAiSettings,
-    getRegisteredBaseUrlConfigs,
-    getAvailableModels,
     saveAiSettings,
+    getSharedLlmConfig,
+    subscribeLlmConfig,
+    addLlmProvider,
+    updateLlmProvider,
+    removeLlmProvider,
+    addLlmPreset,
+    updateLlmPreset,
+    removeLlmPreset,
+    setDefaultLlmPresetId,
+    setNetworkRoomId,
+    getAvailableModels,
     testAiConnection,
 } from '../../services/ai';
+import { requestOnboarding } from '../../services/onboarding';
 import { MESSAGES_JA } from '@tik-choco/mistai';
 import { ConsumerStatusIndicator, ProviderStatusPanel } from '@tik-choco/mistai/preact';
 import { useMistllm } from '../../hooks/useMistllm';
 import { useNetworkProvider } from '../../hooks/useNetworkProvider';
 
 const SETTINGS_TABS = [
-    { key: 'api', label: 'API接続' },
-    { key: 'models', label: 'モデル' },
+    { key: 'providers', label: '接続' },
+    { key: 'presets', label: 'プリセット' },
+    { key: 'tasks', label: 'タスク' },
     { key: 'network', label: 'ネットワーク' },
 ];
 
-const MODEL_TASKS = [
-    { key: 'explain', label: 'AI解説' },
-    { key: 'translate', label: 'AI翻訳' },
-    { key: 'chat', label: 'チャット' },
-    { key: 'ocr', label: 'OCR' },
-];
+const TASK_LABELS = {
+    explain: 'AI解説',
+    translate: 'AI翻訳',
+    chat: 'チャット',
+    ocr: 'OCR',
+};
 
-function NetworkProviderCard({ settings, updateSettings }) {
-    const provider = useNetworkProvider({
-        networkProviderEnabled: settings.networkProviderEnabled,
-        mistllmRoomId: settings.mistllmRoomId,
-    });
+function NetworkProviderCard({ networkProviderEnabled, roomId, onToggle }) {
+    const provider = useNetworkProvider({ networkProviderEnabled, roomId });
 
     return (
         <div className="settings-role-card">
             <label className="settings-role-head">
                 <input
                     type="checkbox"
-                    checked={Boolean(settings.networkProviderEnabled)}
-                    onChange={(event) => updateSettings({ ...settings, networkProviderEnabled: event.target.checked })}
+                    checked={Boolean(networkProviderEnabled)}
+                    onChange={(event) => onToggle(event.target.checked)}
                 />
                 <span className="settings-role-title">
                     <strong>AIを提供する（プロバイダ）</strong>
-                    <span className="hint">このデバイスのAPI設定を使って、ネットワーク上の他デバイスからのLLMリクエストを処理します。</span>
+                    <span className="hint">このデバイスの接続設定を使って、ネットワーク上の他デバイスからのLLMリクエストを処理します。</span>
                 </span>
             </label>
-            {settings.networkProviderEnabled && (
+            {networkProviderEnabled && (
                 <div className="settings-role-body">
                     <ProviderStatusPanel
                         status={provider.status}
@@ -59,7 +67,7 @@ function NetworkProviderCard({ settings, updateSettings }) {
                         messages={MESSAGES_JA}
                         notice={!provider.upstreamConfigured ? (
                             <p className="mistai-status-detail error">
-                                提供するには「API接続」タブでBase URL/APIキー、「モデル」タブでチャット用モデルを設定してください。
+                                提供するには「プリセット」タブでプリセットを作成し、「タスク」タブでチャット用に割り当てるか既定プリセットに設定してください。
                             </p>
                         ) : null}
                     />
@@ -70,162 +78,155 @@ function NetworkProviderCard({ settings, updateSettings }) {
 }
 
 export function SettingsPanel() {
-    const [activeTab, setActiveTab] = useState('api');
+    const [activeTab, setActiveTab] = useState('providers');
     const [settings, setSettings] = useState(getAiSettings());
-    const [availableModelsByBaseUrl, setAvailableModelsByBaseUrl] = useState({});
-    const [loadingModelsForBaseUrl, setLoadingModelsForBaseUrl] = useState('');
-    const [newBaseUrlLabel, setNewBaseUrlLabel] = useState('');
-    const [newBaseUrl, setNewBaseUrl] = useState('');
-    const [newBaseUrlApiKey, setNewBaseUrlApiKey] = useState('');
-    const [connectionStatus, setConnectionStatus] = useState('');
-    const [connectionError, setConnectionError] = useState('');
-    const [isTestingConnection, setIsTestingConnection] = useState(false);
-    const [roomIdInput, setRoomIdInput] = useState(settings.mistllmRoomId || '');
+    const [sharedConfig, setSharedConfig] = useState(getSharedLlmConfig());
+    const [modelsByProviderId, setModelsByProviderId] = useState({});
+    const [loadingProviderId, setLoadingProviderId] = useState('');
+    const [providerTestState, setProviderTestState] = useState({});
+
+    const [newProviderLabel, setNewProviderLabel] = useState('');
+    const [newProviderBaseUrl, setNewProviderBaseUrl] = useState('');
+    const [newProviderApiKey, setNewProviderApiKey] = useState('');
+
+    const [newPresetLabel, setNewPresetLabel] = useState('');
+    const [newPresetProviderId, setNewPresetProviderId] = useState('');
+    const [newPresetModel, setNewPresetModel] = useState('');
+    const [newPresetReasoningEffort, setNewPresetReasoningEffort] = useState('none');
+
+    const [roomIdInput, setRoomIdInput] = useState(sharedConfig.network.roomId || '');
     const mistllm = useMistllm();
+
+    const refreshSharedConfig = () => setSharedConfig(getSharedLlmConfig());
 
     useEffect(() => {
         const handleSyncUpdate = () => setSettings(getAiSettings());
         window.addEventListener('sync-data-updated', handleSyncUpdate);
-        fetchModels();
+        // 他アプリ/他タブでの共有LLM設定変更(providers/presets/roomIdなど)を反映する。
+        const unsubscribe = subscribeLlmConfig(() => {
+            const next = getSharedLlmConfig();
+            setSharedConfig(next);
+            setRoomIdInput(next.network.roomId || '');
+        });
 
-        return () => window.removeEventListener('sync-data-updated', handleSyncUpdate);
+        return () => {
+            window.removeEventListener('sync-data-updated', handleSyncUpdate);
+            unsubscribe();
+        };
     }, []);
 
-    const fetchModels = async (baseUrl = settings.baseUrl, settingsOverride = settings) => {
-        setLoadingModelsForBaseUrl(baseUrl);
-        const models = await getAvailableModels({ ...settingsOverride, baseUrl });
-        setAvailableModelsByBaseUrl((current) => ({ ...current, [baseUrl]: models }));
-        setLoadingModelsForBaseUrl('');
-    };
-
     const updateSettings = (nextSettings) => {
-        const baseUrlConfigs = getRegisteredBaseUrlConfigs(nextSettings);
-        const normalizedSettings = {
-            ...nextSettings,
-            baseUrlConfigs,
-            baseUrls: baseUrlConfigs.map((config) => config.url),
-        };
-        setSettings(normalizedSettings);
-        saveAiSettings(normalizedSettings);
+        setSettings(nextSettings);
+        saveAiSettings(nextSettings);
         window.dispatchEvent(new CustomEvent('sync-data-updated'));
     };
 
-    const handleAddBaseUrl = () => {
-        const baseUrl = newBaseUrl.trim().replace(/\/$/, '');
+    const fetchProviderModels = async (provider) => {
+        if (!provider) return;
+        setLoadingProviderId(provider.id);
+        const models = await getAvailableModels({ baseUrl: provider.baseUrl, apiKey: provider.apiKey });
+        setModelsByProviderId((current) => ({ ...current, [provider.id]: models }));
+        setLoadingProviderId('');
+        return models;
+    };
+
+    // --- Providers ---------------------------------------------------------
+
+    const handleAddProvider = () => {
+        const baseUrl = newProviderBaseUrl.trim().replace(/\/$/, '');
         if (!baseUrl) return;
-
-        const baseUrlConfigs = [
-            ...getRegisteredBaseUrlConfigs(settings).filter((config) => config.url !== baseUrl),
-            { label: newBaseUrlLabel.trim() || baseUrl, url: baseUrl, apiKey: newBaseUrlApiKey },
-        ];
-        updateSettings({
-            ...settings,
-            baseUrl,
-            baseUrlConfigs,
-            baseUrls: baseUrlConfigs.map((config) => config.url),
-        });
-        setNewBaseUrlLabel('');
-        setNewBaseUrl('');
-        setNewBaseUrlApiKey('');
-        fetchModels(baseUrl, { ...settings, baseUrl, baseUrlConfigs });
+        addLlmProvider({ label: newProviderLabel.trim() || baseUrl, baseUrl, apiKey: newProviderApiKey });
+        setNewProviderLabel('');
+        setNewProviderBaseUrl('');
+        setNewProviderApiKey('');
+        refreshSharedConfig();
     };
 
-    const handleRemoveBaseUrl = (baseUrlToRemove) => {
-        const baseUrlConfigs = getRegisteredBaseUrlConfigs(settings).filter((config) => config.url !== baseUrlToRemove);
-        if (!baseUrlConfigs.length) return;
+    const handleUpdateProviderField = (id, field, value) => {
+        if (field === 'baseUrl' && !value.trim()) return;
+        updateLlmProvider(id, { [field]: value });
+        refreshSharedConfig();
+    };
 
-        const baseUrls = baseUrlConfigs.map((config) => config.url);
-        const nextBaseUrl = settings.baseUrl === baseUrlToRemove ? baseUrls[0] : settings.baseUrl;
-        const nextModelBaseUrls = Object.fromEntries(
-            Object.entries(settings.modelBaseUrls || {}).map(([task, baseUrl]) => [
+    const clearOrphanedTaskPresetIds = () => {
+        const validPresetIds = new Set(getSharedLlmConfig().presets.map((p) => p.id));
+        const nextTaskPresetIds = Object.fromEntries(
+            AI_TASKS.map((task) => [
                 task,
-                baseUrl === baseUrlToRemove ? nextBaseUrl : baseUrl,
+                validPresetIds.has(settings.taskPresetIds[task]) ? settings.taskPresetIds[task] : '',
             ])
         );
-
-        updateSettings({
-            ...settings,
-            baseUrl: nextBaseUrl,
-            baseUrlConfigs,
-            baseUrls,
-            modelBaseUrls: nextModelBaseUrls,
-        });
+        updateSettings({ ...settings, taskPresetIds: nextTaskPresetIds });
     };
 
-    const handleUpdateBaseUrlApiKey = (baseUrlToUpdate, apiKey) => {
-        const baseUrlConfigs = getRegisteredBaseUrlConfigs(settings).map((config) => (
-            config.url === baseUrlToUpdate ? { ...config, apiKey } : config
-        ));
-        updateSettings({
-            ...settings,
-            baseUrlConfigs,
-            baseUrls: baseUrlConfigs.map((config) => config.url),
-        });
+    const handleRemoveProvider = (id) => {
+        if (sharedConfig.providers.length <= 1) return;
+        if (!confirm('この接続と、これを使うプリセットを削除しますか？')) return;
+        removeLlmProvider(id);
+        refreshSharedConfig();
+        clearOrphanedTaskPresetIds();
     };
 
-    const handleUpdateBaseUrlLabel = (baseUrlToUpdate, label) => {
-        const baseUrlConfigs = getRegisteredBaseUrlConfigs(settings).map((config) => (
-            config.url === baseUrlToUpdate ? { ...config, label } : config
-        ));
-        updateSettings({
-            ...settings,
-            baseUrlConfigs,
-            baseUrls: baseUrlConfigs.map((config) => config.url),
-        });
-    };
-
-    const handleUpdateBaseUrlUrl = (baseUrlToUpdate, rawUrl) => {
-        const newUrl = rawUrl.trim().replace(/\/$/, '');
-        if (!newUrl || newUrl === baseUrlToUpdate) return;
-        if (getRegisteredBaseUrlConfigs(settings).some((config) => config.url === newUrl)) return;
-
-        const baseUrlConfigs = getRegisteredBaseUrlConfigs(settings).map((config) => (
-            config.url === baseUrlToUpdate ? { ...config, url: newUrl } : config
-        ));
-        const nextModelBaseUrls = Object.fromEntries(
-            Object.entries(settings.modelBaseUrls || {}).map(([task, baseUrl]) => [
-                task,
-                baseUrl === baseUrlToUpdate ? newUrl : baseUrl,
-            ])
-        );
-
-        updateSettings({
-            ...settings,
-            baseUrl: settings.baseUrl === baseUrlToUpdate ? newUrl : settings.baseUrl,
-            baseUrlConfigs,
-            baseUrls: baseUrlConfigs.map((config) => config.url),
-            modelBaseUrls: nextModelBaseUrls,
-        });
-        setAvailableModelsByBaseUrl((current) => {
-            if (!(baseUrlToUpdate in current)) return current;
-            const next = { ...current, [newUrl]: current[baseUrlToUpdate] };
-            delete next[baseUrlToUpdate];
-            return next;
-        });
-        fetchModels(newUrl, { ...settings, baseUrl: newUrl });
-    };
-
-    const handleTestConnection = async () => {
-        setIsTestingConnection(true);
-        setConnectionStatus(`Testing API connection: ${settings.baseUrl}`);
-        setConnectionError('');
-
+    const handleTestProvider = async (provider) => {
+        setProviderTestState((current) => ({ ...current, [provider.id]: { status: 'busy', message: '' } }));
         try {
-            const result = await testAiConnection(settings);
-            setConnectionStatus(`Connected. ${result.modelCount} models available.`);
-            await fetchModels(settings.baseUrl, settings);
+            const result = await testAiConnection({ baseUrl: provider.baseUrl, apiKey: provider.apiKey });
+            setProviderTestState((current) => ({
+                ...current,
+                [provider.id]: { status: 'ok', message: `接続できました（${result.modelCount}モデル）` },
+            }));
+            fetchProviderModels(provider);
         } catch (err) {
-            setConnectionStatus('Connection failed');
-            setConnectionError(err.message || String(err));
-        } finally {
-            setIsTestingConnection(false);
+            setProviderTestState((current) => ({
+                ...current,
+                [provider.id]: { status: 'error', message: err.message || String(err) },
+            }));
         }
     };
 
-    // The mistllm consumer connection itself is maintained eagerly at the app
-    // level (see hooks/useNetworkConsumerConnection.js, mounted in App.jsx) so
-    // it stays live whether or not this panel is open; this panel only
-    // reflects that connection's state via useMistllm() and saves settings.
+    // --- Presets -------------------------------------------------------------
+
+    const handleAddPreset = () => {
+        const model = newPresetModel.trim();
+        if (!newPresetProviderId || !model) return;
+        addLlmPreset({
+            label: newPresetLabel.trim() || model,
+            providerId: newPresetProviderId,
+            model,
+            reasoningEffort: newPresetReasoningEffort !== 'none' ? newPresetReasoningEffort : undefined,
+        });
+        setNewPresetLabel('');
+        setNewPresetModel('');
+        setNewPresetReasoningEffort('none');
+        refreshSharedConfig();
+    };
+
+    const handleUpdatePreset = (id, patch) => {
+        updateLlmPreset(id, patch);
+        refreshSharedConfig();
+    };
+
+    const handleRemovePreset = (id) => {
+        removeLlmPreset(id);
+        refreshSharedConfig();
+        const nextTaskPresetIds = Object.fromEntries(
+            AI_TASKS.map((task) => [task, settings.taskPresetIds[task] === id ? '' : settings.taskPresetIds[task]])
+        );
+        updateSettings({ ...settings, taskPresetIds: nextTaskPresetIds });
+    };
+
+    const handleSetDefaultPreset = (id) => {
+        setDefaultLlmPresetId(sharedConfig.defaultPresetId === id ? '' : id);
+        refreshSharedConfig();
+    };
+
+    // --- Tasks -----------------------------------------------------------------
+
+    const handleTaskPresetChange = (task, presetId) => {
+        updateSettings({ ...settings, taskPresetIds: { ...settings.taskPresetIds, [task]: presetId } });
+    };
+
+    // --- Network -----------------------------------------------------------
 
     const handleConsumerToggle = (enabled) => {
         updateSettings({ ...settings, backend: enabled ? 'mistllm' : 'http' });
@@ -235,16 +236,15 @@ export function SettingsPanel() {
     };
 
     const handleRoomIdCommit = () => {
-        const roomId = roomIdInput.trim();
-        updateSettings({ ...settings, mistllmRoomId: roomId });
+        setNetworkRoomId(roomIdInput);
+        refreshSharedConfig();
     };
 
-    const baseUrlConfigs = getRegisteredBaseUrlConfigs(settings);
-    const baseUrls = baseUrlConfigs.map((config) => config.url);
-    const getBaseUrlLabel = (baseUrl) => {
-        const config = baseUrlConfigs.find((item) => item.url === baseUrl);
-        return config?.label || baseUrl;
-    };
+    // The mistllm consumer connection itself is maintained eagerly at the app
+    // level (see hooks/useNetworkConsumerConnection.js, mounted in App.jsx) so
+    // it stays live whether or not this panel is open; this panel only
+    // reflects that connection's state via useMistllm() and saves settings.
+
     const isMistllm = settings.backend === 'mistllm';
     const mistllmProviderModels = Array.isArray(mistllm.providerModels) ? mistllm.providerModels : [];
     // Adapt the app's flat useMistllm() state to the library's ConsumerStatus
@@ -255,268 +255,282 @@ export function SettingsPanel() {
             // codeがあれば共有コンポーネント側でカタログ文言に整えられる（messageはフォールバック）。
             ? { phase: 'error', message: mistllm.errorMessage || '', code: mistllm.errorCode || undefined }
             : { phase: mistllm.status };
-    const currentBaseUrlModels = availableModelsByBaseUrl[settings.baseUrl] || [];
 
-    const renderApiTab = () => (
+    const getProviderLabel = (providerId) => {
+        const provider = sharedConfig.providers.find((p) => p.id === providerId);
+        return provider?.label || provider?.baseUrl || '(不明な接続)';
+    };
+
+    const renderProvidersTab = () => (
         <>
             {isMistllm && !settings.networkProviderEnabled && (
                 <p className="hint">
-                    現在はLLMネットワーク（コンシューマ）を利用中のため、この設定は使われません。プロバイダとしてAIを提供する場合や、ネットワークをオフにした場合に使用されます。
+                    現在はLLMネットワーク（コンシューマ）を利用中のため、この接続設定は使われません。プロバイダとしてAIを提供する場合や、ネットワークをオフにした場合に使用されます。
                 </p>
             )}
+            <p className="hint">
+                接続（Base URL・APIキー）は同一オリジンの他アプリ（tc-note、tc-translateなど）とも共有されます。一度設定すれば他アプリでも再利用できます。
+            </p>
             <div className="form-group">
-                <label htmlFor="new-ai-base-url">Base URLs</label>
+                <label htmlFor="new-provider-base-url">接続を追加</label>
                 <div className="base-url-add-row">
                     <input
-                        id="new-ai-base-url-label"
-                        name="new-ai-base-url-label"
-                        value={newBaseUrlLabel}
-                        onInput={(event) => setNewBaseUrlLabel(event.target.value)}
+                        id="new-provider-label"
+                        name="new-provider-label"
+                        value={newProviderLabel}
+                        onInput={(event) => setNewProviderLabel(event.target.value)}
                         onKeyDown={(event) => {
-                            if (event.key === 'Enter') handleAddBaseUrl();
+                            if (event.key === 'Enter') handleAddProvider();
                         }}
                         placeholder="ラベル"
                         autoComplete="off"
                     />
                     <input
-                        id="new-ai-base-url"
-                        name="new-ai-base-url"
-                        value={newBaseUrl}
-                        onInput={(event) => setNewBaseUrl(event.target.value)}
+                        id="new-provider-base-url"
+                        name="new-provider-base-url"
+                        value={newProviderBaseUrl}
+                        onInput={(event) => setNewProviderBaseUrl(event.target.value)}
                         onKeyDown={(event) => {
-                            if (event.key === 'Enter') handleAddBaseUrl();
+                            if (event.key === 'Enter') handleAddProvider();
                         }}
                         placeholder="https://..."
                         autoComplete="off"
                     />
                     <input
-                        id="new-ai-base-url-api-key"
-                        name="new-ai-base-url-api-key"
+                        id="new-provider-api-key"
+                        name="new-provider-api-key"
                         type="password"
-                        value={newBaseUrlApiKey}
-                        onInput={(event) => setNewBaseUrlApiKey(event.target.value)}
+                        value={newProviderApiKey}
+                        onInput={(event) => setNewProviderApiKey(event.target.value)}
                         onKeyDown={(event) => {
-                            if (event.key === 'Enter') handleAddBaseUrl();
+                            if (event.key === 'Enter') handleAddProvider();
                         }}
                         placeholder="API Key（ローカルLLMでは省略可）"
                         autoComplete="off"
                     />
-                    <button className="icon-form-btn" onClick={handleAddBaseUrl} title="Base URLを追加">
+                    <button className="icon-form-btn" onClick={handleAddProvider} title="接続を追加">
                         <Plus size={14} />
                     </button>
                 </div>
                 <div className="base-url-list">
-                    {baseUrlConfigs.map((config) => (
-                        <div key={config.url} className="base-url-item">
-                            <input
-                                value={config.label}
-                                onInput={(event) => handleUpdateBaseUrlLabel(config.url, event.target.value)}
-                                placeholder="ラベル"
-                                autoComplete="off"
-                            />
-                            <input
-                                value={config.url}
-                                title={config.url}
-                                onBlur={(event) => handleUpdateBaseUrlUrl(config.url, event.target.value)}
-                                onKeyDown={(event) => {
-                                    if (event.key === 'Enter') event.target.blur();
-                                }}
-                                placeholder="https://..."
-                                autoComplete="off"
-                            />
-                            <input
-                                type="password"
-                                value={config.apiKey || ''}
-                                onInput={(event) => handleUpdateBaseUrlApiKey(config.url, event.target.value)}
-                                placeholder="API Key"
-                                autoComplete="off"
-                            />
-                            <button
-                                className="icon-form-btn is-danger"
-                                onClick={() => handleRemoveBaseUrl(config.url)}
-                                disabled={baseUrls.length <= 1}
-                                title="Base URLを削除"
-                            >
-                                <Trash2 size={13} />
-                            </button>
-                        </div>
-                    ))}
+                    {sharedConfig.providers.map((provider) => {
+                        const testState = providerTestState[provider.id];
+                        return (
+                            <div key={provider.id} className="base-url-item-wrapper">
+                                <div className="base-url-item">
+                                    <input
+                                        value={provider.label}
+                                        onInput={(event) => handleUpdateProviderField(provider.id, 'label', event.target.value)}
+                                        placeholder="ラベル"
+                                        autoComplete="off"
+                                    />
+                                    <input
+                                        value={provider.baseUrl}
+                                        title={provider.baseUrl}
+                                        onBlur={(event) => handleUpdateProviderField(provider.id, 'baseUrl', event.target.value)}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter') event.target.blur();
+                                        }}
+                                        placeholder="https://..."
+                                        autoComplete="off"
+                                    />
+                                    <input
+                                        type="password"
+                                        value={provider.apiKey || ''}
+                                        onInput={(event) => handleUpdateProviderField(provider.id, 'apiKey', event.target.value)}
+                                        placeholder="API Key"
+                                        autoComplete="off"
+                                    />
+                                    <div className="base-url-actions">
+                                        <button
+                                            className="icon-form-btn"
+                                            onClick={() => handleTestProvider(provider)}
+                                            disabled={loadingProviderId === provider.id}
+                                            title="接続テスト"
+                                        >
+                                            <RefreshCw size={13} className={testState?.status === 'busy' ? 'spinning' : ''} />
+                                        </button>
+                                        <button
+                                            className="icon-form-btn is-danger"
+                                            onClick={() => handleRemoveProvider(provider.id)}
+                                            disabled={sharedConfig.providers.length <= 1}
+                                            title="接続を削除"
+                                        >
+                                            <Trash2 size={13} />
+                                        </button>
+                                    </div>
+                                </div>
+                                {testState && (
+                                    <div className="settings-test-result">
+                                        <span className={testState.status === 'error' ? 'error' : ''}>{testState.message}</span>
+                                    </div>
+                                )}
+                            </div>
+                        );
+                    })}
                 </div>
-            </div>
-            <div className="form-group">
-                <button className="save-btn" onClick={handleTestConnection} disabled={isTestingConnection}>
-                    <RefreshCw size={14} className={isTestingConnection ? 'spinning' : ''} />
-                    API接続テスト
-                </button>
-                {(connectionStatus || connectionError) && (
-                    <div className="settings-test-result">
-                        <span className={connectionError ? 'error' : ''}>{connectionError || connectionStatus}</span>
-                    </div>
-                )}
             </div>
         </>
     );
 
-    const renderModelsTab = () => (
+    const renderPresetsTab = () => (
         <div className="form-group">
-            <div className="model-header">
-                <label>タスク別モデル</label>
-                {!isMistllm && (
-                    <button
-                        className="refresh-btn"
-                        onClick={() => fetchModels(settings.baseUrl)}
-                        disabled={Boolean(loadingModelsForBaseUrl)}
-                        title="モデル一覧を再取得"
-                    >
-                        <RefreshCw size={12} className={loadingModelsForBaseUrl ? 'spinning' : ''} />
-                    </button>
-                )}
+            <label>プリセット（呼び方＋接続先）</label>
+            <p className="hint">
+                プリセットは「どのモデルを、どの接続で、どんなreasoningで呼ぶか」の組み合わせです。★は既定プリセット（タスクに未割当のときに使われます）。
+            </p>
+            <div className="preset-add-row">
+                <input
+                    value={newPresetLabel}
+                    onInput={(event) => setNewPresetLabel(event.target.value)}
+                    placeholder="ラベル（省略可）"
+                    autoComplete="off"
+                />
+                <select
+                    value={newPresetProviderId}
+                    onChange={(event) => setNewPresetProviderId(event.target.value)}
+                >
+                    <option value="">(接続を選択...)</option>
+                    {sharedConfig.providers.map((provider) => (
+                        <option key={provider.id} value={provider.id}>{provider.label}</option>
+                    ))}
+                </select>
+                <input
+                    value={newPresetModel}
+                    onInput={(event) => setNewPresetModel(event.target.value)}
+                    placeholder="モデル名"
+                    autoComplete="off"
+                    list="preset-add-model-options"
+                />
+                <datalist id="preset-add-model-options">
+                    {(modelsByProviderId[newPresetProviderId] || []).map((model) => (
+                        <option key={model} value={model} />
+                    ))}
+                </datalist>
+                <select
+                    value={newPresetReasoningEffort}
+                    onChange={(event) => setNewPresetReasoningEffort(event.target.value)}
+                >
+                    {REASONING_EFFORT_OPTIONS.map((effort) => (
+                        <option key={effort} value={effort}>{effort}</option>
+                    ))}
+                </select>
+                <button className="icon-form-btn" onClick={handleAddPreset} title="プリセットを追加">
+                    <Plus size={14} />
+                </button>
             </div>
-            {isMistllm ? (
-                <p className="hint">
-                    {mistllmProviderModels.length > 0
-                        ? `プロバイダから${mistllmProviderModels.length}件のモデルを取得済みです。一覧から選択してください（接続先の選択は不要です）。`
-                        : 'プロバイダに接続するとモデル一覧を取得できます。未取得の間はモデル名を直接入力してください（接続先の選択は不要です）。'}
-                </p>
-            ) : (
-                <p className="model-status">
-                    {loadingModelsForBaseUrl
-                        ? 'モデル一覧を取得中…'
-                        : currentBaseUrlModels.length > 0
-                            ? `${currentBaseUrlModels.length}件のモデルを取得済み`
-                            : 'モデル一覧が未取得です。「API接続」タブで接続テストするか、更新ボタンを押してください。'}
-                </p>
-            )}
-            {MODEL_TASKS.map((task) => {
-                const currentModel = settings.models?.[task.key] || '';
-                const selectedBaseUrl = settings.modelBaseUrls?.[task.key] || settings.baseUrl;
-                const selectedReasoningEffort = settings.modelReasoningEfforts?.[task.key] || settings.reasoningEffort || 'none';
-                const modelOptions = Array.from(new Set([
-                    ...DEFAULT_MODELS,
-                    ...(availableModelsByBaseUrl[selectedBaseUrl] || []),
-                    currentModel,
-                ].filter(Boolean))).sort();
-                const selectedModel = modelOptions.includes(currentModel) ? currentModel : '';
-                const mistllmModelOptions = Array.from(new Set(
-                    [...mistllmProviderModels, currentModel].filter(Boolean)
-                ));
 
-                return (
-                    <div key={task.key} className="task-model-item">
-                        <span>{task.label}</span>
-                        <div className="task-model-fields">
-                            {!isMistllm && (
-                                <div className="task-model-field">
-                                    <label htmlFor={`select-base-url-${task.key}`}>接続先</label>
-                                    <select
-                                        id={`select-base-url-${task.key}`}
-                                        name={`select-base-url-${task.key}`}
-                                        value={selectedBaseUrl}
-                                        onChange={(event) => {
-                                            const baseUrl = event.target.value;
-                                            updateSettings({
-                                                ...settings,
-                                                modelBaseUrls: { ...settings.modelBaseUrls, [task.key]: baseUrl },
-                                            });
-                                            if (!availableModelsByBaseUrl[baseUrl]) fetchModels(baseUrl);
-                                        }}
-                                        autoComplete="off"
-                                    >
-                                        {baseUrlConfigs.map((config) => (
-                                            <option key={config.url} value={config.url}>{getBaseUrlLabel(config.url)}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-                            <div className="task-model-field">
-                                <label htmlFor={`select-model-${task.key}`}>モデル</label>
-                                {isMistllm ? (
-                                    mistllmModelOptions.length > 0 ? (
-                                        <select
-                                            id={`select-model-${task.key}`}
-                                            name={`select-model-${task.key}`}
-                                            value={currentModel}
-                                            onChange={(event) => {
-                                                updateSettings({
-                                                    ...settings,
-                                                    models: { ...settings.models, [task.key]: event.target.value },
-                                                });
-                                            }}
-                                            autoComplete="off"
-                                        >
-                                            <option value="">(選択...)</option>
-                                            {mistllmModelOptions.map((model) => (
-                                                <option key={model} value={model}>{model}</option>
-                                            ))}
-                                        </select>
-                                    ) : (
-                                        <input
-                                            id={`select-model-${task.key}`}
-                                            name={`select-model-${task.key}`}
-                                            value={currentModel}
-                                            onInput={(event) => {
-                                                updateSettings({
-                                                    ...settings,
-                                                    models: { ...settings.models, [task.key]: event.target.value },
-                                                });
-                                            }}
-                                            placeholder="モデル名を入力"
-                                            autoComplete="off"
-                                        />
-                                    )
-                                ) : (
-                                    <select
-                                        id={`select-model-${task.key}`}
-                                        name={`select-model-${task.key}`}
-                                        value={selectedModel}
-                                        onChange={(event) => {
-                                            updateSettings({
-                                                ...settings,
-                                                models: { ...settings.models, [task.key]: event.target.value },
-                                            });
-                                        }}
-                                        autoComplete="off"
-                                    >
-                                        <option value="">(選択...)</option>
-                                        {modelOptions.map((model) => (
-                                            <option key={model} value={model}>{model}</option>
-                                        ))}
-                                    </select>
-                                )}
-                            </div>
-                            <div className="task-model-field">
-                                <label htmlFor={`select-reasoning-effort-${task.key}`}>reasoning</label>
-                                <select
-                                    id={`select-reasoning-effort-${task.key}`}
-                                    name={`select-reasoning-effort-${task.key}`}
-                                    value={selectedReasoningEffort}
-                                    onChange={(event) => {
-                                        updateSettings({
-                                            ...settings,
-                                            modelReasoningEfforts: {
-                                                ...settings.modelReasoningEfforts,
-                                                [task.key]: event.target.value,
-                                            },
-                                        });
-                                    }}
-                                    autoComplete="off"
+            <div className="preset-list">
+                {sharedConfig.presets.length === 0 && (
+                    <p className="hint">プリセットがまだありません。上のフォームから追加してください。</p>
+                )}
+                {sharedConfig.presets.map((preset) => {
+                    const isDefault = sharedConfig.defaultPresetId === preset.id;
+                    const providerModels = modelsByProviderId[preset.providerId] || [];
+                    return (
+                        <div key={preset.id} className={`preset-item ${isDefault ? 'is-default' : ''}`}>
+                            <input
+                                value={preset.label}
+                                onInput={(event) => handleUpdatePreset(preset.id, { label: event.target.value })}
+                                placeholder="ラベル"
+                                autoComplete="off"
+                            />
+                            <select
+                                value={preset.providerId}
+                                onChange={(event) => handleUpdatePreset(preset.id, { providerId: event.target.value })}
+                            >
+                                {sharedConfig.providers.map((provider) => (
+                                    <option key={provider.id} value={provider.id}>{provider.label}</option>
+                                ))}
+                            </select>
+                            <input
+                                value={preset.model}
+                                onInput={(event) => handleUpdatePreset(preset.id, { model: event.target.value })}
+                                placeholder="モデル名"
+                                autoComplete="off"
+                                list={`preset-model-options-${preset.id}`}
+                            />
+                            <datalist id={`preset-model-options-${preset.id}`}>
+                                {providerModels.map((model) => (
+                                    <option key={model} value={model} />
+                                ))}
+                            </datalist>
+                            <select
+                                value={preset.reasoningEffort || 'none'}
+                                onChange={(event) => handleUpdatePreset(preset.id, {
+                                    reasoningEffort: event.target.value === 'none' ? '' : event.target.value,
+                                })}
+                            >
+                                {REASONING_EFFORT_OPTIONS.map((effort) => (
+                                    <option key={effort} value={effort}>{effort}</option>
+                                ))}
+                            </select>
+                            <div className="preset-actions">
+                                <button
+                                    className={`icon-form-btn preset-default-btn ${isDefault ? 'is-active' : ''}`}
+                                    onClick={() => handleSetDefaultPreset(preset.id)}
+                                    title="既定プリセットにする"
                                 >
-                                    {REASONING_EFFORT_OPTIONS.map((effort) => (
-                                        <option key={effort} value={effort}>{effort}</option>
-                                    ))}
-                                </select>
+                                    <Star size={13} />
+                                </button>
+                                <button
+                                    className="icon-form-btn"
+                                    onClick={() => fetchProviderModels(sharedConfig.providers.find((p) => p.id === preset.providerId))}
+                                    disabled={loadingProviderId === preset.providerId}
+                                    title="モデル候補を取得"
+                                >
+                                    <RefreshCw size={13} className={loadingProviderId === preset.providerId ? 'spinning' : ''} />
+                                </button>
+                                <button
+                                    className="icon-form-btn is-danger"
+                                    onClick={() => handleRemovePreset(preset.id)}
+                                    title="プリセットを削除"
+                                >
+                                    <Trash2 size={13} />
+                                </button>
                             </div>
                         </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+
+    const renderTasksTab = () => (
+        <div className="form-group">
+            <label>タスク別プリセット</label>
+            <p className="hint">未設定のタスクは、チャット用のプリセット、それも未設定なら既定プリセットを使います。</p>
+            {AI_TASKS.map((task) => (
+                <div key={task} className="task-model-item">
+                    <span>{TASK_LABELS[task]}</span>
+                    <div className="task-model-fields">
+                        <div className="task-model-field">
+                            <label htmlFor={`select-preset-${task}`}>プリセット</label>
+                            <select
+                                id={`select-preset-${task}`}
+                                name={`select-preset-${task}`}
+                                value={settings.taskPresetIds[task] || ''}
+                                onChange={(event) => handleTaskPresetChange(task, event.target.value)}
+                                autoComplete="off"
+                            >
+                                <option value="">(未設定 → 既定を使用)</option>
+                                {sharedConfig.presets.map((preset) => (
+                                    <option key={preset.id} value={preset.id}>
+                                        {preset.label}（{getProviderLabel(preset.providerId)}）
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
                     </div>
-                );
-            })}
+                </div>
+            ))}
         </div>
     );
 
     const renderNetworkTab = () => (
         <>
             <p className="hint">
-                Mist LLMネットワーク（P2P）では、同じRoom IDに参加したデバイス同士でLLMを共有できます。
+                Mist LLMネットワーク（P2P）では、同じRoom IDに参加したデバイス同士でLLMを共有できます。Room IDは同一オリジンの他アプリとも共有されます。
             </p>
             <div className="form-group">
                 <label htmlFor="mistllm-room-id">Room ID</label>
@@ -556,7 +570,11 @@ export function SettingsPanel() {
                     </div>
                 )}
             </div>
-            <NetworkProviderCard settings={settings} updateSettings={updateSettings} />
+            <NetworkProviderCard
+                networkProviderEnabled={settings.networkProviderEnabled}
+                roomId={sharedConfig.network.roomId}
+                onToggle={(enabled) => updateSettings({ ...settings, networkProviderEnabled: enabled })}
+            />
         </>
     );
 
@@ -578,9 +596,19 @@ export function SettingsPanel() {
                 ))}
             </div>
             <div className="settings-tab-panel" role="tabpanel">
-                {activeTab === 'api' && renderApiTab()}
-                {activeTab === 'models' && renderModelsTab()}
+                {activeTab === 'providers' && renderProvidersTab()}
+                {activeTab === 'presets' && renderPresetsTab()}
+                {activeTab === 'tasks' && renderTasksTab()}
                 {activeTab === 'network' && renderNetworkTab()}
+            </div>
+
+            <h3>はじめに</h3>
+            <p className="hint">初回セットアップのガイドをもう一度開けます。</p>
+            <div className="form-group">
+                <button className="save-btn" onClick={requestOnboarding}>
+                    <Sparkles size={14} />
+                    セットアップガイドを開く
+                </button>
             </div>
         </div>
     );

@@ -1,4 +1,4 @@
-﻿import {
+import {
     MESSAGES_JA,
     MistaiError,
     fetchModels,
@@ -7,48 +7,79 @@
 } from '@tik-choco/mistai';
 import { getExplanation, saveExplanation } from './storage';
 import { getMistllmConsumer } from './mistllm';
+import {
+    emptyLlmConfig,
+    ensurePreset,
+    ensureProvider,
+    loadLlmConfig,
+    normalizeBaseUrl,
+    resolvePreset,
+    saveLlmConfig,
+    subscribeLlmConfig,
+} from './llmConfig';
 
-export const DEFAULT_MODELS = [];
+export { subscribeLlmConfig };
+
 export const REASONING_EFFORT_OPTIONS = ['none', 'minimal', 'low', 'medium', 'high'];
 export const AI_BACKENDS = ['http', 'mistllm'];
+export const AI_TASKS = ['explain', 'translate', 'chat', 'ocr'];
 const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
+
+// New app-local settings key (task->preset mapping + app-local prefs only).
+// Connection info (baseUrl/apiKey/model) now lives in the shared
+// tc-shared-llm-config-v1 key (see ./llmConfig.js). The old 'ai_settings' key
+// is migrated once (see migrateLegacyAiSettings below) and then removed.
+const AI_SETTINGS_KEY = 'tc-pdf-viewer-ai-settings-v1';
+const LEGACY_AI_SETTINGS_KEY = 'ai_settings';
 
 const DEFAULT_SETTINGS = {
     backend: 'http',
-    mistllmRoomId: '',
     networkProviderEnabled: false,
-    baseUrl: DEFAULT_BASE_URL,
-    baseUrls: [DEFAULT_BASE_URL],
-    baseUrlConfigs: [{ label: 'OpenAI', url: DEFAULT_BASE_URL, apiKey: '' }],
-    apiKey: '',
-    models: {
+    taskPresetIds: {
         explain: '',
         translate: '',
         chat: '',
         ocr: ''
     },
-    modelBaseUrls: {
-        explain: DEFAULT_BASE_URL,
-        translate: DEFAULT_BASE_URL,
-        chat: DEFAULT_BASE_URL,
-        ocr: DEFAULT_BASE_URL
-    },
-    modelReasoningEfforts: {
-        explain: 'none',
-        translate: 'none',
-        chat: 'none',
-        ocr: 'none'
-    },
     promptTemplate: '以下の用語や文章を簡潔に、かつ専門的に解説してください:\n\n"{text}"',
-    reasoningEffort: 'none',
     targetLanguages: ['日本語', 'English', '中国語', '韓国語', 'スペイン語']
 };
 
-function normalizeBaseUrl(baseUrl) {
+function normalizeAiSettings(settings) {
+    const merged = { ...DEFAULT_SETTINGS, ...(settings || {}) };
+    const backend = AI_BACKENDS.includes(merged.backend) ? merged.backend : DEFAULT_SETTINGS.backend;
+    const networkProviderEnabled = typeof merged.networkProviderEnabled === 'boolean'
+        ? merged.networkProviderEnabled
+        : DEFAULT_SETTINGS.networkProviderEnabled;
+
+    const taskPresetIds = { ...DEFAULT_SETTINGS.taskPresetIds };
+    AI_TASKS.forEach((task) => {
+        const value = merged.taskPresetIds?.[task];
+        taskPresetIds[task] = typeof value === 'string' ? value : '';
+    });
+
+    const promptTemplate = typeof merged.promptTemplate === 'string' && merged.promptTemplate
+        ? merged.promptTemplate
+        : DEFAULT_SETTINGS.promptTemplate;
+    const targetLanguages = Array.isArray(merged.targetLanguages) && merged.targetLanguages.length
+        ? merged.targetLanguages
+        : DEFAULT_SETTINGS.targetLanguages;
+
+    return { backend, networkProviderEnabled, taskPresetIds, promptTemplate, targetLanguages };
+}
+
+// ---------------------------------------------------------------------------
+// One-time migration: 'ai_settings' (baseUrl/apiKey/models per task) -> the
+// shared tc-shared-llm-config-v1 providers/presets + this app's local
+// taskPresetIds. See protocol/docs/data-contracts/docs/llm-config.md
+// "マイグレーション規則" for the merge-never-delete policy this follows.
+// ---------------------------------------------------------------------------
+
+function normalizeLegacyBaseUrl(baseUrl) {
     return (baseUrl || '').trim().replace(/\/$/, '');
 }
 
-function defaultBaseUrlLabel(baseUrl) {
+function legacyDefaultBaseUrlLabel(baseUrl) {
     try {
         return new URL(baseUrl).host || baseUrl;
     } catch {
@@ -56,142 +87,305 @@ function defaultBaseUrlLabel(baseUrl) {
     }
 }
 
-function getBaseUrlList(settings) {
-    const urls = [
-        ...(Array.isArray(settings?.baseUrls) ? settings.baseUrls : []),
-        ...(Array.isArray(settings?.baseUrlConfigs) ? settings.baseUrlConfigs.map((config) => config?.url) : []),
-        settings?.baseUrl,
-    ]
-        .map(normalizeBaseUrl)
-        .filter(Boolean);
-
-    return Array.from(new Set(urls));
-}
-
-function getBaseUrlConfigs(settings) {
-    const configsByUrl = new Map();
-
-    if (Array.isArray(settings?.baseUrlConfigs)) {
-        settings.baseUrlConfigs.forEach((config) => {
-            const url = normalizeBaseUrl(config?.url);
-            if (!url) return;
-            const label = (config?.label || '').trim();
-            const hasOwnApiKey = Object.prototype.hasOwnProperty.call(config, 'apiKey');
-            const existing = configsByUrl.get(url);
-            configsByUrl.set(url, {
-                label: label || existing?.label || defaultBaseUrlLabel(url),
-                url,
-                apiKey: hasOwnApiKey ? (config.apiKey || '') : (existing?.apiKey || settings?.apiKey || ''),
-            });
-        });
+// Reconstructs a fully-populated view of the legacy shape from whatever
+// partial/older object was actually stored, so the migration logic below can
+// rely on every field being present. Deliberately independent of the current
+// (post-migration) DEFAULT_SETTINGS shape.
+function reconstructLegacySettings(saved) {
+    if (saved.model && !saved.models) {
+        saved.models = { explain: saved.model, translate: saved.model, chat: saved.model };
     }
 
-    getBaseUrlList(settings).forEach((url) => {
-        if (configsByUrl.has(url)) return;
-        configsByUrl.set(url, {
-            label: defaultBaseUrlLabel(url),
+    const baseUrlConfigsByUrl = new Map();
+    (Array.isArray(saved.baseUrlConfigs) ? saved.baseUrlConfigs : []).forEach((config) => {
+        const url = normalizeLegacyBaseUrl(config?.url);
+        if (!url) return;
+        const label = (config?.label || '').trim();
+        baseUrlConfigsByUrl.set(url, {
+            label: label || legacyDefaultBaseUrlLabel(url),
             url,
-            apiKey: settings?.apiKey || '',
+            apiKey: config?.apiKey || saved.apiKey || '',
         });
     });
+    [...(Array.isArray(saved.baseUrls) ? saved.baseUrls : []), saved.baseUrl]
+        .map(normalizeLegacyBaseUrl)
+        .filter(Boolean)
+        .forEach((url) => {
+            if (baseUrlConfigsByUrl.has(url)) return;
+            baseUrlConfigsByUrl.set(url, { label: legacyDefaultBaseUrlLabel(url), url, apiKey: saved.apiKey || '' });
+        });
 
-    return Array.from(configsByUrl.values());
-}
+    const baseUrlConfigs = baseUrlConfigsByUrl.size
+        ? Array.from(baseUrlConfigsByUrl.values())
+        : [{ label: 'OpenAI', url: DEFAULT_BASE_URL, apiKey: saved.apiKey || '' }];
+    const normalizedSavedBaseUrl = normalizeLegacyBaseUrl(saved.baseUrl);
+    const baseUrl = baseUrlConfigsByUrl.has(normalizedSavedBaseUrl) ? normalizedSavedBaseUrl : baseUrlConfigs[0].url;
 
-function normalizeAiSettings(settings) {
-    const merged = { ...DEFAULT_SETTINGS, ...(settings || {}) };
-    const baseUrlConfigs = getBaseUrlConfigs(merged);
-    const baseUrls = baseUrlConfigs.map((config) => config.url);
-    const fallbackBaseUrl = baseUrls[0] || DEFAULT_BASE_URL;
-    const baseUrl = baseUrls.includes(normalizeBaseUrl(merged.baseUrl))
-        ? normalizeBaseUrl(merged.baseUrl)
-        : fallbackBaseUrl;
-    const modelBaseUrls = { ...DEFAULT_SETTINGS.modelBaseUrls, ...merged.modelBaseUrls };
-    const fallbackReasoningEffort = REASONING_EFFORT_OPTIONS.includes(merged.reasoningEffort)
-        ? merged.reasoningEffort
-        : DEFAULT_SETTINGS.reasoningEffort;
-    const modelReasoningEfforts = {
-        ...DEFAULT_SETTINGS.modelReasoningEfforts,
-        ...Object.fromEntries(Object.keys(DEFAULT_SETTINGS.models).map((task) => [task, fallbackReasoningEffort])),
-        ...(merged.modelReasoningEfforts || {})
-    };
-
-    Object.keys(DEFAULT_SETTINGS.models).forEach((task) => {
-        const taskBaseUrl = normalizeBaseUrl(modelBaseUrls[task]);
-        modelBaseUrls[task] = baseUrls.includes(taskBaseUrl) ? taskBaseUrl : baseUrl;
-        if (!REASONING_EFFORT_OPTIONS.includes(modelReasoningEfforts[task])) {
-            modelReasoningEfforts[task] = DEFAULT_SETTINGS.modelReasoningEfforts[task];
-        }
-    });
-
-    const backend = AI_BACKENDS.includes(merged.backend) ? merged.backend : DEFAULT_SETTINGS.backend;
-    const mistllmRoomId = typeof merged.mistllmRoomId === 'string' ? merged.mistllmRoomId : DEFAULT_SETTINGS.mistllmRoomId;
-    const networkProviderEnabled = typeof merged.networkProviderEnabled === 'boolean'
-        ? merged.networkProviderEnabled
-        : DEFAULT_SETTINGS.networkProviderEnabled;
+    const models = { explain: '', translate: '', chat: '', ocr: '', ...(saved.models || {}) };
+    const modelBaseUrls = { explain: baseUrl, translate: baseUrl, chat: baseUrl, ocr: baseUrl, ...(saved.modelBaseUrls || {}) };
+    const modelReasoningEfforts = { explain: 'none', translate: 'none', chat: 'none', ocr: 'none', ...(saved.modelReasoningEfforts || {}) };
 
     return {
-        ...merged,
-        backend,
-        mistllmRoomId,
-        networkProviderEnabled,
+        backend: AI_BACKENDS.includes(saved.backend) ? saved.backend : 'http',
+        mistllmRoomId: typeof saved.mistllmRoomId === 'string' ? saved.mistllmRoomId : '',
+        networkProviderEnabled: typeof saved.networkProviderEnabled === 'boolean' ? saved.networkProviderEnabled : false,
         baseUrl,
-        baseUrls,
         baseUrlConfigs,
-        models: { ...DEFAULT_SETTINGS.models, ...merged.models },
+        apiKey: saved.apiKey || '',
+        models,
         modelBaseUrls,
         modelReasoningEfforts,
-        reasoningEffort: fallbackReasoningEffort
+        promptTemplate: typeof saved.promptTemplate === 'string' && saved.promptTemplate
+            ? saved.promptTemplate
+            : DEFAULT_SETTINGS.promptTemplate,
+        targetLanguages: Array.isArray(saved.targetLanguages) && saved.targetLanguages.length
+            ? saved.targetLanguages
+            : DEFAULT_SETTINGS.targetLanguages,
     };
+}
+
+// Runs (at most once, idempotently) whenever the legacy 'ai_settings' key is
+// still present. Returns the freshly-migrated local settings object, or null
+// if there was nothing to migrate.
+function migrateLegacyAiSettings() {
+    let legacyRaw;
+    try {
+        legacyRaw = localStorage.getItem(LEGACY_AI_SETTINGS_KEY);
+    } catch {
+        return null;
+    }
+    if (!legacyRaw) return null;
+
+    let legacy = null;
+    try {
+        legacy = JSON.parse(legacyRaw);
+    } catch (e) {
+        console.error('Failed to parse legacy ai_settings for migration:', e);
+    }
+    if (!legacy || typeof legacy !== 'object') {
+        try { localStorage.removeItem(LEGACY_AI_SETTINGS_KEY); } catch { /* noop */ }
+        return null;
+    }
+
+    const legacySettings = reconstructLegacySettings(legacy);
+    const sharedConfig = loadLlmConfig() ?? emptyLlmConfig();
+
+    const isPristineDefaultConfig = (config) =>
+        normalizeBaseUrl(config.url) === normalizeBaseUrl(DEFAULT_BASE_URL) && !config.apiKey;
+    const hasAnyModel = AI_TASKS.some((task) => (legacySettings.models[task] || '').trim());
+
+    // Seed a provider for every registered base URL, except a never-touched
+    // default OpenAI entry with no API key when no task has a model
+    // configured anywhere (i.e. the user never actually used AI features).
+    legacySettings.baseUrlConfigs
+        .filter((config) => !(isPristineDefaultConfig(config) && !hasAnyModel))
+        .forEach((config) => {
+            ensureProvider(sharedConfig, { label: config.label, baseUrl: config.url, apiKey: config.apiKey || '' });
+        });
+
+    const taskPresetIds = { explain: '', translate: '', chat: '', ocr: '' };
+    let firstCreatedPresetId = '';
+    AI_TASKS.forEach((task) => {
+        const model = (legacySettings.models[task] || '').trim();
+        if (!model) return;
+
+        const taskBaseUrl = legacySettings.modelBaseUrls[task] || legacySettings.baseUrl;
+        const taskConfig = legacySettings.baseUrlConfigs.find(
+            (config) => normalizeBaseUrl(config.url) === normalizeBaseUrl(taskBaseUrl)
+        );
+        const apiKey = taskConfig?.apiKey || legacySettings.apiKey || '';
+        const providerId = ensureProvider(sharedConfig, {
+            label: taskConfig?.label,
+            baseUrl: taskBaseUrl,
+            apiKey,
+        });
+
+        const reasoningEffort = legacySettings.modelReasoningEfforts[task];
+        const presetId = ensurePreset(sharedConfig, {
+            label: model,
+            providerId,
+            model,
+            reasoningEffort: reasoningEffort && reasoningEffort !== 'none' ? reasoningEffort : undefined,
+        });
+        taskPresetIds[task] = presetId;
+        if (!firstCreatedPresetId) firstCreatedPresetId = presetId;
+    });
+
+    if (!sharedConfig.defaultPresetId) {
+        sharedConfig.defaultPresetId = taskPresetIds.chat || firstCreatedPresetId || '';
+    }
+
+    const roomId = (legacySettings.mistllmRoomId || '').trim();
+    if (roomId && !sharedConfig.network.roomId) {
+        sharedConfig.network.roomId = roomId;
+    }
+
+    saveLlmConfig(sharedConfig);
+
+    const migratedLocal = normalizeAiSettings({
+        backend: legacySettings.backend,
+        networkProviderEnabled: legacySettings.networkProviderEnabled,
+        taskPresetIds,
+        promptTemplate: legacySettings.promptTemplate,
+        targetLanguages: legacySettings.targetLanguages,
+    });
+
+    try {
+        localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(migratedLocal));
+    } catch (e) {
+        console.error('Failed to persist migrated ai settings:', e);
+    }
+    try {
+        localStorage.removeItem(LEGACY_AI_SETTINGS_KEY);
+    } catch { /* noop */ }
+
+    return migratedLocal;
 }
 
 export function getAiSettings() {
-    const savedString = localStorage.getItem('ai_settings');
-    if (!savedString) return DEFAULT_SETTINGS;
-    
+    const migrated = migrateLegacyAiSettings();
+    if (migrated) return migrated;
+
+    let savedString;
+    try {
+        savedString = localStorage.getItem(AI_SETTINGS_KEY);
+    } catch {
+        return normalizeAiSettings(DEFAULT_SETTINGS);
+    }
+    if (!savedString) return normalizeAiSettings(DEFAULT_SETTINGS);
+
     let saved = null;
     try {
         saved = JSON.parse(savedString);
     } catch (e) {
         console.error('Failed to parse AI settings:', e);
     }
-    
-    if (!saved || typeof saved !== 'object') return DEFAULT_SETTINGS;
-    
-    if (saved.model && !saved.models) {
-        saved.models = {
-            explain: saved.model,
-            translate: saved.model,
-            chat: saved.model
-        };
-        delete saved.model;
-    }
+    if (!saved || typeof saved !== 'object') return normalizeAiSettings(DEFAULT_SETTINGS);
 
     return normalizeAiSettings(saved);
 }
 
 export function saveAiSettings(settings) {
-    localStorage.setItem('ai_settings', JSON.stringify(normalizeAiSettings(settings)));
+    try {
+        localStorage.setItem(AI_SETTINGS_KEY, JSON.stringify(normalizeAiSettings(settings)));
+    } catch (e) {
+        console.error('Failed to persist AI settings:', e);
+    }
 }
 
-export function getRegisteredBaseUrls(settingsOverride = null) {
-    return getBaseUrlList(settingsOverride || getAiSettings());
+// ---------------------------------------------------------------------------
+// Shared LLM config (tc-shared-llm-config-v1) accessors/mutators used by
+// SettingsPanel/Onboarding for the providers/presets editors and the network
+// room id. All mutations go through the vendored ensureProvider/ensurePreset
+// (append-only) or direct array edits followed by saveLlmConfig.
+// ---------------------------------------------------------------------------
+
+export function getSharedLlmConfig() {
+    return loadLlmConfig() ?? emptyLlmConfig();
 }
 
-export function getRegisteredBaseUrlConfigs(settingsOverride = null) {
-    return getBaseUrlConfigs(settingsOverride || getAiSettings());
+export function getNetworkRoomId() {
+    return loadLlmConfig()?.network?.roomId || '';
 }
 
-function getBaseUrlForTask(settings, task = 'chat') {
-    const normalized = normalizeAiSettings(settings);
-    return normalized.modelBaseUrls?.[task] || normalized.baseUrl;
+export function setNetworkRoomId(roomId) {
+    const config = getSharedLlmConfig();
+    config.network = { roomId: (roomId || '').trim() };
+    saveLlmConfig(config);
 }
 
-function getApiKeyForBaseUrl(settings, baseUrl) {
-    const normalized = normalizeAiSettings(settings);
-    const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
-    const config = normalized.baseUrlConfigs.find((item) => item.url === normalizedBaseUrl);
-    return config?.apiKey || normalized.apiKey || '';
+export function addLlmProvider({ label, baseUrl, apiKey }) {
+    const config = getSharedLlmConfig();
+    const id = ensureProvider(config, { label, baseUrl, apiKey: apiKey || '' });
+    saveLlmConfig(config);
+    return id;
+}
+
+export function updateLlmProvider(id, patch) {
+    const config = getSharedLlmConfig();
+    const provider = config.providers.find((p) => p.id === id);
+    if (!provider) return;
+    if (patch.label !== undefined) provider.label = patch.label;
+    if (patch.baseUrl !== undefined) provider.baseUrl = normalizeBaseUrl(patch.baseUrl);
+    if (patch.apiKey !== undefined) provider.apiKey = patch.apiKey;
+    saveLlmConfig(config);
+}
+
+// Removes a provider and any presets that reference it (a preset whose
+// provider no longer exists can't be resolved). Returns the ids of the
+// presets that were removed so the caller can clear any local task/default
+// references to them.
+export function removeLlmProvider(id) {
+    const config = getSharedLlmConfig();
+    config.providers = config.providers.filter((p) => p.id !== id);
+    const removedPresetIds = config.presets.filter((p) => p.providerId === id).map((p) => p.id);
+    config.presets = config.presets.filter((p) => p.providerId !== id);
+    if (removedPresetIds.includes(config.defaultPresetId)) config.defaultPresetId = '';
+    saveLlmConfig(config);
+    return removedPresetIds;
+}
+
+export function addLlmPreset({ label, providerId, model, temperature, reasoningEffort }) {
+    const config = getSharedLlmConfig();
+    const id = ensurePreset(config, { label, providerId, model, temperature, reasoningEffort });
+    saveLlmConfig(config);
+    return id;
+}
+
+export function updateLlmPreset(id, patch) {
+    const config = getSharedLlmConfig();
+    const preset = config.presets.find((p) => p.id === id);
+    if (!preset) return;
+    if (patch.label !== undefined) preset.label = patch.label;
+    if (patch.providerId !== undefined) preset.providerId = patch.providerId;
+    if (patch.model !== undefined) preset.model = patch.model;
+    if (patch.reasoningEffort !== undefined) {
+        if (patch.reasoningEffort) preset.reasoningEffort = patch.reasoningEffort;
+        else delete preset.reasoningEffort;
+    }
+    if (patch.temperature !== undefined) {
+        if (patch.temperature !== null && patch.temperature !== '') preset.temperature = Number(patch.temperature);
+        else delete preset.temperature;
+    }
+    saveLlmConfig(config);
+}
+
+export function removeLlmPreset(id) {
+    const config = getSharedLlmConfig();
+    config.presets = config.presets.filter((p) => p.id !== id);
+    if (config.defaultPresetId === id) config.defaultPresetId = '';
+    saveLlmConfig(config);
+}
+
+export function setDefaultLlmPresetId(id) {
+    const config = getSharedLlmConfig();
+    config.defaultPresetId = id || '';
+    saveLlmConfig(config);
+}
+
+export function setDefaultLlmPresetIdIfEmpty(id) {
+    const config = getSharedLlmConfig();
+    if (config.defaultPresetId) return;
+    config.defaultPresetId = id;
+    saveLlmConfig(config);
+}
+
+// Resolves the connection/model to use for `task`, falling back to the
+// 'chat' task's preset and then the shared default preset (see
+// docs/data-contracts/docs/llm-config.md "解決規則").
+function resolveTaskTarget(settings, task) {
+    const config = getSharedLlmConfig();
+    return (
+        resolvePreset(config, settings.taskPresetIds?.[task]) ||
+        resolvePreset(config, settings.taskPresetIds?.chat) ||
+        resolvePreset(config)
+    );
+}
+
+// Resolves the 'chat' task's target; used by the LLM network provider role
+// (see hooks/useNetworkProvider.js) and by Onboarding to prefill/test.
+export function resolveUpstreamProviderTarget() {
+    return resolveTaskTarget(getAiSettings(), 'chat');
 }
 
 const explanationCache = new Map();
@@ -252,12 +446,12 @@ export async function explainText(text, options = {}) {
         pdfName: options.pdfName || ''
     });
     const result = await chatAi([{ role: 'user', content: prompt }], 'explain');
-    
+
     explanationCache.set(cacheKey, result);
     if (!contextMarkdown) {
         saveExplanation(text, result).catch(e => console.error('Failed to save to Mist:', e));
     }
-    
+
     return result;
 }
 
@@ -502,7 +696,7 @@ function localizeUpstreamError(err) {
     return new Error(formatMistaiError(err, MESSAGES_JA));
 }
 async function chatAiViaMistllm(settings, messages, task, options) {
-    const roomId = (settings.mistllmRoomId || '').trim();
+    const roomId = getNetworkRoomId();
     if (!roomId) throw new Error('Mist LLM Room IDが設定されていません。');
 
     const consumer = getMistllmConsumer();
@@ -512,9 +706,9 @@ async function chatAiViaMistllm(settings, messages, task, options) {
     // chat() internally awaits waitForProvider() (10s timeout) if a provider
     // hasn't announced itself yet, so no extra wait is needed here.
 
-    const model = settings.models?.[task] || settings.models?.chat || undefined;
+    const resolved = resolveTaskTarget(settings, task);
     const result = await consumer.chat(messages, {
-        model,
+        model: resolved?.model || undefined,
         onChunk: options.onDelta,
         signal: options.signal,
         timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
@@ -531,14 +725,11 @@ export async function chatAi(messages, task = 'chat', options = {}) {
         return await chatAiViaMistllm(settings, messages, task, options);
     }
 
-    const baseUrl = getBaseUrlForTask(settings, task);
-    if (!baseUrl) throw new Error('AI Base URLが設定されていません。');
-
-    const apiKey = getApiKeyForBaseUrl(settings, baseUrl);
-    if (!apiKey) throw new Error('APIキーが設定されていません。');
-
-    const model = settings.models?.[task] || settings.models?.chat;
-    if (!model) throw new Error('AIモデルが設定されていません。AI設定でモデルを選択してください。');
+    const resolved = resolveTaskTarget(settings, task);
+    if (!resolved) throw new Error('AIモデルが設定されていません。AI設定でプリセットを選択してください。');
+    if (!resolved.baseUrl) throw new Error('AI Base URLが設定されていません。');
+    if (!resolved.apiKey) throw new Error('APIキーが設定されていません。');
+    if (!resolved.model) throw new Error('AIモデルが設定されていません。AI設定でモデルを選択してください。');
 
     if (options.signal?.aborted) {
         const error = new Error('Request cancelled.');
@@ -566,10 +757,11 @@ export async function chatAi(messages, task = 'chat', options = {}) {
     try {
         const result = await streamChatCompletion(
             {
-                baseUrl,
-                apiKey,
-                model,
-                reasoningEffort: settings.modelReasoningEfforts?.[task] || DEFAULT_SETTINGS.modelReasoningEfforts.chat,
+                baseUrl: resolved.baseUrl,
+                apiKey: resolved.apiKey,
+                model: resolved.model,
+                reasoningEffort: resolved.reasoningEffort || 'none',
+                ...(resolved.temperature !== undefined ? { temperature: resolved.temperature } : {}),
             },
             messages,
             options.onDelta ? handleDelta : undefined,
@@ -577,7 +769,7 @@ export async function chatAi(messages, task = 'chat', options = {}) {
         );
         return result.trim();
     } catch (err) {
-        console.error(`AI Request to ${baseUrl}/chat/completions failed:`, err);
+        console.error(`AI Request to ${resolved.baseUrl}/chat/completions failed:`, err);
         if (didTimeout) {
             throw new Error('リクエストがタイムアウトしました。');
         }
@@ -624,23 +816,21 @@ export async function ocrImagesToMarkdown(images, { fileName = 'document.pdf', s
     return await chatAi([{ role: 'user', content }], 'ocr', { signal });
 }
 
-export async function getAvailableModels(settingsOverride = null) {
-    const settings = settingsOverride || getAiSettings();
-
-    const baseUrl = normalizeBaseUrl(settings.baseUrl);
-    if (!baseUrl) {
-        console.warn('AI Base URL is empty. Please set it in settings.');
+// Fetches the model list for a given (baseUrl, apiKey) connection, used by
+// the providers/presets editors in SettingsPanel/Onboarding.
+export async function getAvailableModels({ baseUrl, apiKey } = {}) {
+    const normalizedBaseUrl = normalizeBaseUrl(baseUrl || '');
+    if (!normalizedBaseUrl) {
+        console.warn('AI Base URL is empty.');
         return [];
     }
-
-    const apiKey = getApiKeyForBaseUrl(settings, baseUrl);
     if (!apiKey) return [];
 
     try {
-        const models = await fetchModels({ baseUrl, apiKey });
+        const models = await fetchModels({ baseUrl: normalizedBaseUrl, apiKey });
         return [...models].sort();
     } catch (err) {
-        console.error(`Failed to fetch models from ${baseUrl}/models:`, err);
+        console.error(`Failed to fetch models from ${normalizedBaseUrl}/models:`, err);
         // Special hint for CORS/Mixed Content
         if (err instanceof MistaiError && err.code === 'UPSTREAM_REQUEST_FAILED' && err.message.includes('Failed to fetch')) {
             console.error('This is likely a CORS or Mixed Content (HTTPS to HTTP) error. Check your API endpoint and browser console.');
@@ -656,27 +846,25 @@ export async function getAvailableModels(settingsOverride = null) {
  * ('http' | 'mistllm') is currently selected for this device's own use —
  * the provider always calls out over HTTP, never routes through itself.
  * The upstream call itself is the shared streamChatCompletion; this wrapper
- * resolves the base URL / API key / model from the app settings.
+ * resolves the connection/model from the shared config's 'chat' task preset.
  */
 export async function streamUpstreamChatCompletion(messages, model, onDelta) {
-    const settings = getAiSettings();
-    const baseUrl = getBaseUrlForTask(settings, 'chat');
-    if (!baseUrl) throw new Error('AI Base URLが設定されていません。');
+    const resolved = resolveUpstreamProviderTarget();
+    if (!resolved || !resolved.baseUrl) throw new Error('AI Base URLが設定されていません。');
+    if (!resolved.apiKey) throw new Error('APIキーが設定されていません。');
 
-    const apiKey = getApiKeyForBaseUrl(settings, baseUrl);
-    if (!apiKey) throw new Error('APIキーが設定されていません。');
-
-    const resolvedModel = (model || settings.models?.chat || '').trim();
+    const resolvedModel = (model || resolved.model || '').trim();
     if (!resolvedModel) throw new Error('AIモデルが設定されていません。');
 
     let result;
     try {
         result = await streamChatCompletion(
             {
-                baseUrl,
-                apiKey,
+                baseUrl: resolved.baseUrl,
+                apiKey: resolved.apiKey,
                 model: resolvedModel,
-                reasoningEffort: settings.modelReasoningEfforts?.chat || DEFAULT_SETTINGS.modelReasoningEfforts.chat,
+                reasoningEffort: resolved.reasoningEffort || 'none',
+                ...(resolved.temperature !== undefined ? { temperature: resolved.temperature } : {}),
             },
             messages,
             (delta) => onDelta?.(delta)
@@ -689,17 +877,13 @@ export async function streamUpstreamChatCompletion(messages, model, onDelta) {
     return result;
 }
 
-export async function testAiConnection(settingsOverride = null) {
-    const settings = settingsOverride || getAiSettings();
-
-    const baseUrl = normalizeBaseUrl(settings.baseUrl);
-    if (!baseUrl) throw new Error('AI Base URLが設定されていません。');
-
-    const apiKey = getApiKeyForBaseUrl(settings, baseUrl);
+export async function testAiConnection({ baseUrl, apiKey } = {}) {
+    const normalizedBaseUrl = normalizeBaseUrl(baseUrl || '');
+    if (!normalizedBaseUrl) throw new Error('AI Base URLが設定されていません。');
     if (!apiKey) throw new Error('APIキーが設定されていません。');
 
     try {
-        const models = await fetchModels({ baseUrl, apiKey });
+        const models = await fetchModels({ baseUrl: normalizedBaseUrl, apiKey });
         return {
             ok: true,
             modelCount: models.length
@@ -722,4 +906,3 @@ export async function testAiConnection(settingsOverride = null) {
         throw err;
     }
 }
-
