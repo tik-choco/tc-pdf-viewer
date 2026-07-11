@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { getMistllmProvider } from '../services/mistllm';
-import { streamUpstreamChatCompletion, getAiSettings, getAvailableModels } from '../services/ai';
+import { streamUpstreamChatCompletion, getAvailableModels, resolveUpstreamProviderTarget } from '../services/ai';
 import { getOrCreateMistllmNodeId } from '../utils/mist';
 
 /**
@@ -13,7 +13,7 @@ import { getOrCreateMistllmNodeId } from '../utils/mist';
  *
  * Ported from tc-translate's src/hooks/useNetworkProvider.ts.
  */
-export function useNetworkProvider({ networkProviderEnabled, mistllmRoomId }) {
+export function useNetworkProvider({ networkProviderEnabled, roomId }) {
     const provider = getMistllmProvider();
     const [state, setState] = useState(provider.getState());
     const [ownNodeId] = useState(() => getOrCreateMistllmNodeId());
@@ -23,14 +23,14 @@ export function useNetworkProvider({ networkProviderEnabled, mistllmRoomId }) {
         return unsubscribe;
     }, [provider]);
 
-    const roomId = (mistllmRoomId || '').trim();
-    const settings = getAiSettings();
-    const upstreamConfigured = Boolean(
-        (settings.models?.chat || '').trim() && (settings.baseUrl || '').trim()
-    );
+    const trimmedRoomId = (roomId || '').trim();
+    // 'chat' タスクに割り当てられたプリセット(未割当なら既定プリセット)の接続先を、
+    // アップストリームとして提供する。
+    const target = resolveUpstreamProviderTarget();
+    const upstreamConfigured = Boolean(target?.baseUrl && target?.apiKey && target?.model);
 
     useEffect(() => {
-        if (!networkProviderEnabled || !roomId || !upstreamConfigured) {
+        if (!networkProviderEnabled || !trimmedRoomId || !upstreamConfigured) {
             provider.stop();
             return;
         }
@@ -39,9 +39,9 @@ export function useNetworkProvider({ networkProviderEnabled, mistllmRoomId }) {
         // Fetched once per start (not on every provider_hello) and handed to
         // MistllmProvider.start() to advertise alongside provider_hello, so
         // consumers can offer a model picker instead of free text.
-        getAvailableModels(settings).then((models) => {
+        getAvailableModels({ baseUrl: target.baseUrl, apiKey: target.apiKey }).then((models) => {
             if (cancelled) return;
-            provider.start(roomId, streamUpstreamChatCompletion, models).catch((err) => {
+            provider.start(trimmedRoomId, streamUpstreamChatCompletion, models).catch((err) => {
                 console.error('LLMネットワーク提供の開始に失敗しました:', err);
             });
         });
@@ -54,7 +54,7 @@ export function useNetworkProvider({ networkProviderEnabled, mistllmRoomId }) {
             // Stopping happens explicitly above when disabled/misconfigured.
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [networkProviderEnabled, roomId, upstreamConfigured]);
+    }, [networkProviderEnabled, trimmedRoomId, upstreamConfigured]);
 
     return {
         status: state.status,
@@ -65,7 +65,7 @@ export function useNetworkProvider({ networkProviderEnabled, mistllmRoomId }) {
         consumerCount: state.consumerCount,
         logs: state.logs,
         ownNodeId,
-        roomId,
+        roomId: trimmedRoomId,
         upstreamConfigured,
     };
 }
