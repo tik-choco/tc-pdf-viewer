@@ -4,7 +4,7 @@ import PdfViewer from './components/PdfViewer';
 import MarkdownViewer from './components/MarkdownViewer';
 import Tooltip from './components/Tooltip';
 import Chat from './components/Chat';
-import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, saveOcrMarkdownSummary, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot } from './services/storage';
+import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, saveOcrMarkdownSummary, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveOcrMarkdownIndex, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot, saveTranslatedMarkdownIndex, migrateMarkdownIndexesToCid } from './services/storage';
 import { scheduleDriveExport } from './services/driveExport';
 import { extractText, renderPdfPagesToImages } from './services/pdf';
 import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown, summarizeOcrMarkdown, getNetworkRoomId } from './services/ai';
@@ -17,6 +17,8 @@ import { DiffConfirmPanel } from './components/DiffConfirmPanel';
 import { QRPanel } from './components/QRPanel';
 import { Onboarding } from './components/Onboarding';
 import { shouldShowOnboarding, markOnboardingDone, subscribeOnboardingRequests } from './services/onboarding';
+import { readShared, subscribeShared } from './services/sharedBus';
+import { importFromHandoffInbox, inboxTopic as pdfHandoffInboxTopic } from './services/storageHandoffInbox';
 
 const PREFETCH_CONCURRENCY = 3;
 const AI_JOB_RETENTION_MS = 8000;
@@ -169,6 +171,11 @@ export function App() {
     const loadData = async () => {
       const list = await loadPdfList();
       setPdfs(list);
+      // One-time (idempotent) migration of legacy inline OCR/translated
+      // Markdown bodies to mistlib CID storage - see storage.js.
+      await migrateMarkdownIndexesToCid().catch((error) => {
+        console.warn('failed to migrate markdown indexes to CID form', error);
+      });
       setOcrMarkdownIndex(getOcrMarkdownIndexSnapshot());
       setTranslatedMarkdownIndex(getTranslatedMarkdownIndexSnapshot());
       const savedFolders = localStorage.getItem('mist_custom_folders');
@@ -239,14 +246,33 @@ export function App() {
   } = useSync({
     state: syncState,
     onReplaceState: (nextState) => {
-      localStorage.setItem('mist_files_index', JSON.stringify(nextState.files));
-      localStorage.setItem('mist_explanations_index', JSON.stringify(nextState.explanations));
-      localStorage.setItem('mist_ocr_markdown_index', JSON.stringify(nextState.ocrMarkdown || {}));
-      localStorage.setItem('mist_translated_markdown_index', JSON.stringify(nextState.translatedMarkdown || {}));
+      try {
+        localStorage.setItem('mist_files_index', JSON.stringify(nextState.files));
+      } catch (error) {
+        console.warn('failed to persist mist_files_index from sync', error);
+      }
+      try {
+        localStorage.setItem('mist_explanations_index', JSON.stringify(nextState.explanations));
+      } catch (error) {
+        console.warn('failed to persist mist_explanations_index from sync', error);
+      }
+      // Async CID-aware writers (see services/storage.js) - not awaited here
+      // since onReplaceState itself isn't awaited by useSync; failures are
+      // logged internally by the writers and never drop the incoming state.
+      saveOcrMarkdownIndex(nextState.ocrMarkdown || {});
+      saveTranslatedMarkdownIndex(nextState.translatedMarkdown || {});
       saveAiSettings(nextState.aiSettings);
-      localStorage.setItem('mist_last_lang', nextState.lastLang);
-      localStorage.setItem('mist_custom_folders', JSON.stringify(nextState.customFolders));
-      
+      try {
+        localStorage.setItem('mist_last_lang', nextState.lastLang);
+      } catch (error) {
+        console.warn('failed to persist mist_last_lang from sync', error);
+      }
+      try {
+        localStorage.setItem('mist_custom_folders', JSON.stringify(nextState.customFolders));
+      } catch (error) {
+        console.warn('failed to persist mist_custom_folders from sync', error);
+      }
+
       setLastLang(nextState.lastLang);
       setPdfs(nextState.files);
       setOcrMarkdownIndex(nextState.ocrMarkdown || {});
@@ -815,6 +841,43 @@ export function App() {
     if (savedPdf) {
       handleSelectPdf(savedPdf);
     }
+  }, []);
+
+  // Consumes files handed off from tc-storage (the sibling drive app on the
+  // same origin) via the shared-bus `pdf-viewer-inbox` topic: user clicked
+  // "open in tc-pdf-viewer" on a PDF preview there. Imported PDFs are added
+  // through the normal savePdf() path (see services/storageHandoffInbox.js),
+  // then the library list is refreshed and the newest import is opened —
+  // best-effort, since the user likely just opened this tab for that PDF.
+  useEffect(() => {
+    const handleInboxRecord = (record) => {
+      importFromHandoffInbox(record, {
+        onImported: async (names) => {
+          try {
+            setPdfs(await loadPdfList());
+          } catch (err) {
+            console.warn('tc-pdf-viewer: failed to refresh pdf list after inbox import', err);
+          }
+          const newest = names[names.length - 1];
+          if (newest) handleSelectPdf(newest);
+        },
+      });
+    };
+
+    try {
+      const record = readShared(pdfHandoffInboxTopic);
+      if (record) handleInboxRecord(record);
+    } catch (err) {
+      console.warn('tc-pdf-viewer: failed to read pdf-viewer-inbox on mount', err);
+    }
+
+    let unsubscribe = () => {};
+    try {
+      unsubscribe = subscribeShared(pdfHandoffInboxTopic, handleInboxRecord);
+    } catch (err) {
+      console.warn('tc-pdf-viewer: failed to subscribe to pdf-viewer-inbox', err);
+    }
+    return () => unsubscribe();
   }, []);
 
   const handleHoverText = useCallback((text, pos) => {
