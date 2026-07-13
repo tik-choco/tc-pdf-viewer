@@ -19,6 +19,6 @@ writeAppManifest({
     app: 'tc-pdf-viewer',
     busVersion: BUS_VERSION,
     publishes: ['ocr-markdown-index', 'folder-export'],
-    consumes: [],
+    consumes: ['pdf-viewer-inbox'],
     reads: [],
 });

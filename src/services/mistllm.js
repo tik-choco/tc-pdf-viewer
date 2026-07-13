@@ -3,10 +3,15 @@
 // The wire protocol (v: 1, incl. the provider_hello.models extension this app
 // pioneered) and the request/response plumbing now come from the shared
 // @tik-choco/mistai library:
-//   - encode/decode        -> @tik-choco/mistai protocol (wire compatible)
-//   - chunk reordering,    -> ConsumerService (seq handling, per-request
-//     request correlation     inactivity timeout, rejectAll)
-//   - llm_request handling -> ProviderService (streaming + request log)
+//   - encode/decode          -> @tik-choco/mistai protocol (wire compatible)
+//   - chunk reordering,      -> ConsumerService (seq handling, per-request
+//     request correlation       inactivity timeout, rejectAll/rejectByProvider)
+//   - llm_request handling   -> ProviderService (streaming + request log)
+//   - provider matching      -> selectProvider (service + model matching over
+//                                a provider table, v0.4+)
+//   - failover policy        -> isFailoverEligible (v0.4+, exported so
+//                                Pattern B apps can retry identically to
+//                                ConsumerClient)
 //
 // What stays app-side (and why this is NOT the library's ConsumerClient /
 // useNetworkProvider): this app's mistlib wrapper is a single-global-node
@@ -15,9 +20,18 @@
 // with pdf-sync). The library's ConsumerClient creates its own Network/node,
 // which would clobber the global node and change our wire identity. So the
 // claimRoom/releaseRoom arbitration, the refcounted shared room membership
-// between the consumer and provider roles, the provider_hello latching /
-// status state machines, and AbortSignal support all remain here, wired to
-// the library services via their injected SendFn (README "Pattern B").
+// between the consumer and provider roles, the provider table + status state
+// machines, and AbortSignal support all remain here, wired to the library
+// services via their injected SendFn (README "Pattern B" — mirrors tc-note's
+// src/lib/llmNet.ts, which does the same for its own custom transport).
+//
+// Provider selection (consumer side) now matches mistai v0.4.1's
+// ConsumerClient: every announced provider is kept in a table (keyed by peer
+// id, updated on each provider_hello, dropped on disconnect) instead of
+// latching onto the first one forever; `selectProvider` narrows by
+// provider_hello.services (this app only ever advertises/consumes "chat") and
+// then by advertised model; a single failover retry is attempted via
+// `isFailoverEligible` before the first response chunk arrives.
 //
 // Public API is unchanged: encode, decode, MistllmConsumer/getMistllmConsumer,
 // MistllmProvider/getMistllmProvider — hooks and ai.js need no changes.
@@ -30,6 +44,9 @@ import {
     decode,
     encode,
     formatMistaiCode,
+    helloServices,
+    isFailoverEligible,
+    selectProvider,
 } from '@tik-choco/mistai';
 import { DELIVERY_RELIABLE, EVENT_RAW } from '../lib/mistlib/index.js';
 import {
@@ -161,14 +178,20 @@ async function acquireRoomExclusive(roomId, onEvent) {
 
 /**
  * Consumer-side wrapper around the shared mistlib room: joins the room, sends
- * consumer_hello, latches onto the first provider_hello (first-come-first-
- * served), and delegates llm_request/response correlation (seq reordering,
- * inactivity timeout) to the library's ConsumerService.
+ * consumer_hello, accumulates every announced provider into a table (updated
+ * on each provider_hello, pruned on disconnect — mirrors mistai's
+ * ConsumerClient), and delegates llm_request/response correlation (seq
+ * reordering, inactivity timeout) to the library's ConsumerService.
+ * `selectProvider` matches a request's service ("chat") and optional model
+ * against the table; `chat()` retries once via `isFailoverEligible` if the
+ * chosen provider disconnects/times out/rejects the service before any
+ * response chunk arrives.
  *
  * Status is a small state machine surfaced to the UI:
- *   idle -> joining -> searching -> connected (providerId)
+ *   idle -> joining -> searching -> connected (providerId: first-discovered,
+ *   kept for backward compatibility with the single-provider UI)
  * with a transition back to 'error' on join failure, and back to 'searching'
- * (never 'error') if the active provider disconnects — a new provider_hello
+ * (never 'error') once the provider table empties — a new provider_hello
  * can still arrive and recover the session.
  */
 export class MistllmConsumer {
@@ -176,8 +199,13 @@ export class MistllmConsumer {
         this.roomId = null;
         this.node = null;
         this.status = 'idle'; // idle | joining | searching | connected | error
-        this.providerId = null;
-        this.providerModels = []; // model ids advertised by the connected provider, if any
+        // Every provider we've heard a provider_hello from, keyed by peer id:
+        // { models?: string[], services: readonly string[] }. Mirrors mistai's
+        // ConsumerClient internal provider table; selectProvider() reads this
+        // directly.
+        this.providerTable = new Map();
+        this.providerId = null; // first-discovered provider id, kept for UI backward compatibility
+        this.providerModels = []; // union of every known provider's advertised models, deduped
         this.errorMessage = '';
         this.errorCode = null; // MistaiErrorCode when the error came from the library, else null
         this.updatedAt = Date.now();
@@ -199,7 +227,7 @@ export class MistllmConsumer {
         return {
             status: this.status,
             providerId: this.providerId,
-            providerCount: this.providerId ? 1 : 0,
+            providerCount: this.providerTable.size,
             providerModels: this.providerModels,
             errorMessage: this.errorMessage,
             errorCode: this.errorCode,
@@ -211,6 +239,25 @@ export class MistllmConsumer {
     subscribe(listener) {
         this.listeners.add(listener);
         return () => this.listeners.delete(listener);
+    }
+
+    /**
+     * Recomputes the backward-compatible `providerId` (first-discovered) /
+     * `providerModels` (deduped union) fields from `providerTable`. Callers
+     * still emit explicitly afterwards (via _setStatus or _emit) so a single
+     * notification covers both the table change and any status transition.
+     */
+    _refreshProviderFields() {
+        this.providerId = this.providerTable.keys().next().value ?? null;
+        const modelSet = new Set();
+        let anyModels = false;
+        this.providerTable.forEach((info) => {
+            if (info.models) {
+                anyModels = true;
+                info.models.forEach((m) => modelSet.add(m));
+            }
+        });
+        this.providerModels = anyModels ? Array.from(modelSet) : [];
     }
 
     _emit() {
@@ -249,6 +296,7 @@ export class MistllmConsumer {
         this._teardownRoom();
         this.service.rejectAll(abortError('Mist LLMネットワークから切断されました。'));
         this._rejectAllProviderWaiters(new Error('接続がリセットされました。'));
+        this.providerTable.clear();
         this.providerId = null;
         this.providerModels = [];
         this.roomId = normalizedRoomId;
@@ -281,12 +329,25 @@ export class MistllmConsumer {
                     return;
                 }
 
-                if (eventType === EVENT_PEER_DISCONNECTED && fromId === this.providerId) {
-                    // Auto-recovery: don't error out, just go back to searching —
-                    // a replacement provider_hello can still arrive.
-                    this.providerId = null;
-                    this._setStatus('searching', { providerModels: [] });
-                    this._startHelloRetry();
+                if (eventType === EVENT_PEER_DISCONNECTED && this.providerTable.delete(fromId)) {
+                    // Only the requests actually sent to this provider are
+                    // rejected — an in-flight request to a different, still-
+                    // connected provider is left alone (ConsumerService's
+                    // rejectByProvider, v0.4+).
+                    this.service.rejectByProvider(
+                        fromId,
+                        new MistaiError('PROVIDER_DISCONNECTED', 'Connection to the provider was lost.'),
+                    );
+                    this._refreshProviderFields();
+                    if (this.providerTable.size === 0) {
+                        // Auto-recovery: don't error out, just go back to
+                        // searching — a replacement provider_hello can still
+                        // arrive.
+                        this._setStatus('searching');
+                        this._startHelloRetry();
+                    } else {
+                        this._emit();
+                    }
                 }
             });
 
@@ -317,22 +378,19 @@ export class MistllmConsumer {
 
     _handleMessage(fromId, msg) {
         if (msg.type === 'provider_hello') {
-            const models = Array.isArray(msg.models) ? msg.models : [];
-            if (!this.providerId) {
+            const wasEmpty = this.providerTable.size === 0;
+            this.providerTable.set(fromId, {
+                models: Array.isArray(msg.models) ? msg.models : undefined,
+                services: helloServices(msg),
+            });
+            this._refreshProviderFields();
+            if (wasEmpty) {
                 this._stopHelloRetry();
-                this.providerId = fromId;
-                this._setStatus('connected', { providerModels: models });
-                const waiters = this.providerWaiters.splice(0);
-                waiters.forEach((waiter) => {
-                    clearTimeout(waiter.timer);
-                    waiter.resolve(fromId);
-                });
-            } else if (fromId === this.providerId) {
-                // Same provider re-announcing (e.g. after our consumer_hello) —
-                // refresh its advertised model list without a full status churn.
-                this.providerModels = models;
+                this._setStatus('connected');
+            } else {
                 this._emit();
             }
+            this._resolveProviderWaiters();
             return;
         }
 
@@ -342,15 +400,19 @@ export class MistllmConsumer {
     }
 
     /**
-     * Resolves once a provider is known, waiting up to 10s for a
-     * provider_hello if none has arrived yet. Distinct from the (much
-     * longer) per-request timeout used by chat().
+     * Resolves once an eligible ("chat", matching `model` if given) provider
+     * is known, waiting up to PROVIDER_WAIT_TIMEOUT_MS for a provider_hello if
+     * none has arrived yet. Distinct from the (much longer) per-request
+     * timeout used by chat(). Resolves with a `{ providerId, model }`
+     * selection from mistai's selectProvider — `model` may differ from the
+     * requested one (omitted) per selectProvider's matching rules.
      */
-    waitForProvider() {
-        if (this.providerId) return Promise.resolve(this.providerId);
+    waitForProvider(model) {
+        const immediate = selectProvider(this.providerTable, 'chat', model);
+        if (immediate) return Promise.resolve(immediate);
 
         return new Promise((resolve, reject) => {
-            const waiter = { resolve, reject, timer: null };
+            const waiter = { model, resolve, reject, timer: null };
             waiter.timer = setTimeout(() => {
                 const index = this.providerWaiters.indexOf(waiter);
                 if (index >= 0) this.providerWaiters.splice(index, 1);
@@ -363,6 +425,22 @@ export class MistllmConsumer {
             }, PROVIDER_WAIT_TIMEOUT_MS);
             this.providerWaiters.push(waiter);
         });
+    }
+
+    /** Resolves any parked waitForProvider() calls the updated table can now satisfy. */
+    _resolveProviderWaiters() {
+        if (this.providerWaiters.length === 0) return;
+        const remaining = [];
+        this.providerWaiters.forEach((waiter) => {
+            const selection = selectProvider(this.providerTable, 'chat', waiter.model);
+            if (selection) {
+                clearTimeout(waiter.timer);
+                waiter.resolve(selection);
+            } else {
+                remaining.push(waiter);
+            }
+        });
+        this.providerWaiters = remaining;
     }
 
     _rejectAllProviderWaiters(error) {
@@ -405,6 +483,14 @@ export class MistllmConsumer {
     /**
      * Sends an llm_request and resolves with the fully-assembled reply.
      * options: { model, onChunk(delta, fullSoFar), signal, timeoutMs }
+     *
+     * Provider is chosen via mistai's `selectProvider` (service "chat", then
+     * `model` if given). If the chosen provider disconnects, times out, or
+     * rejects with "unsupported_service" *before any response chunk arrives*,
+     * this retries exactly once against another eligible provider
+     * (`isFailoverEligible` — matches mistai's ConsumerClient policy). Once
+     * streaming has started, no failover is attempted so a cancelled/failed
+     * retry can't produce duplicate or garbled output.
      */
     async chat(messages, options = {}) {
         const { model, onChunk, signal, timeoutMs = REQUEST_TIMEOUT_MS } = options;
@@ -412,13 +498,14 @@ export class MistllmConsumer {
         if (!this.node) throw new Error('Mist LLMネットワークに接続されていません。');
         if (signal?.aborted) throw abortError('Request cancelled.');
 
-        const providerId = await this.waitForProvider();
+        const first = await this.waitForProvider(model);
 
         // ConsumerService has no AbortSignal support, so adapt: race the
         // request against the signal, and mute onChunk once settled so a
         // cancelled request can't keep streaming into the UI.
         return new Promise((resolve, reject) => {
             let settled = false;
+            let receivedChunk = false;
             let abortHandler = null;
             const cleanup = () => {
                 settled = true;
@@ -434,27 +521,44 @@ export class MistllmConsumer {
                 signal.addEventListener('abort', abortHandler, { once: true });
             }
 
-            this.service
-                .request(providerId, messages, {
-                    model,
-                    timeoutMs,
-                    onDelta: (delta, full) => {
-                        if (settled) return;
-                        onChunk?.(delta, full);
-                    },
-                })
-                .then(
-                    (content) => {
-                        if (settled) return;
-                        cleanup();
-                        resolve(content);
-                    },
-                    (err) => {
-                        if (settled) return;
-                        cleanup();
-                        reject(localizeMistaiError(err));
-                    },
-                );
+            const attempt = (selection) => {
+                this.service
+                    .request(selection.providerId, messages, {
+                        model: selection.model,
+                        timeoutMs,
+                        onDelta: (delta, full) => {
+                            if (settled) return;
+                            receivedChunk = true;
+                            onChunk?.(delta, full);
+                        },
+                    })
+                    .then(
+                        (content) => {
+                            if (settled) return;
+                            cleanup();
+                            resolve(content);
+                        },
+                        (err) => {
+                            if (settled) return;
+                            if (!receivedChunk && isFailoverEligible(err)) {
+                                const retry = selectProvider(
+                                    this.providerTable,
+                                    'chat',
+                                    model,
+                                    new Set([selection.providerId]),
+                                );
+                                if (retry) {
+                                    attempt(retry);
+                                    return;
+                                }
+                            }
+                            cleanup();
+                            reject(localizeMistaiError(err));
+                        },
+                    );
+            };
+
+            attempt(first);
         });
     }
 
@@ -471,6 +575,7 @@ export class MistllmConsumer {
         this.joinGeneration += 1;
         this._teardownRoom();
         this.roomId = null;
+        this.providerTable.clear();
         this.providerId = null;
         this.providerModels = [];
         this.service.rejectAll(abortError('Mist LLMネットワークから切断されました。'));
@@ -556,11 +661,17 @@ export class MistllmProvider {
         };
     }
 
-    /** Builds the provider_hello payload, including `models` only when we have any. */
+    /**
+     * Builds the provider_hello payload. Always advertises `services: ['chat']`
+     * explicitly (this app only ever serves chat) so consumers running
+     * mistai's selectProvider (v0.4+) match us on the announced list rather
+     * than falling back to the legacy no-`services`-field default; `models`
+     * is included only when we have any.
+     */
     _helloMessage() {
         return this.models.length > 0
-            ? { v: 1, type: 'provider_hello', models: this.models }
-            : { v: 1, type: 'provider_hello' };
+            ? { v: 1, type: 'provider_hello', services: ['chat'], models: this.models }
+            : { v: 1, type: 'provider_hello', services: ['chat'] };
     }
 
     subscribe(listener) {

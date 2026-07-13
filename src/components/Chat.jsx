@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'preact/hooks';
 import { Send, Trash2, User, Bot, Loader2, Copy, Check } from 'lucide-preact';
 import { chatAi } from '../services/ai';
 import { renderMarkdown } from '../utils/markdown';
+import { loadChatMessages, saveChatMessages, clearChatMessages } from '../services/storage';
 
 const MessageItem = ({ m }) => {
     const [copied, setCopied] = useState(false);
@@ -47,12 +48,17 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, oc
     const scrollRef = useRef(null);
 
     useEffect(() => {
+        let cancelled = false;
         if (currentPdfName) {
-            const saved = localStorage.getItem(`mist_chat_${currentPdfName}`);
-            setMessages(saved ? JSON.parse(saved) : []);
+            loadChatMessages(currentPdfName).then((saved) => {
+                if (!cancelled) setMessages(saved);
+            });
         } else {
             setMessages([]);
         }
+        return () => {
+            cancelled = true;
+        };
     }, [currentPdfName]);
 
     useEffect(() => {
@@ -68,7 +74,7 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, oc
         const userMsg = { role: 'user', content: input };
         const newMessages = [...messages, userMsg];
         setMessages(newMessages);
-        if (currentPdfName) localStorage.setItem(`mist_chat_${currentPdfName}`, JSON.stringify(newMessages));
+        if (currentPdfName) saveChatMessages(currentPdfName, newMessages).catch((err) => console.warn('failed to save chat message', err));
         setInput('');
         setIsLoading(true);
 
@@ -101,11 +107,11 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, oc
             });
             const finalMessages = [...newMessages, { role: 'assistant', content: response }];
             setMessages(finalMessages);
-            if (currentPdfName) localStorage.setItem(`mist_chat_${currentPdfName}`, JSON.stringify(finalMessages));
+            if (currentPdfName) saveChatMessages(currentPdfName, finalMessages).catch((err) => console.warn('failed to save chat message', err));
         } catch (err) {
             const errMessages = [...newMessages, { role: 'assistant', content: 'エラー: ' + err.message }];
             setMessages(errMessages);
-            if (currentPdfName) localStorage.setItem(`mist_chat_${currentPdfName}`, JSON.stringify(errMessages));
+            if (currentPdfName) saveChatMessages(currentPdfName, errMessages).catch((err2) => console.warn('failed to save chat message', err2));
         } finally {
             setIsLoading(false);
         }
@@ -114,7 +120,7 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, oc
     const clearChat = () => {
         if (confirm('チャットの履歴を消去しますか？')) {
             setMessages([]);
-            if (currentPdfName) localStorage.removeItem(`mist_chat_${currentPdfName}`);
+            if (currentPdfName) clearChatMessages(currentPdfName).catch((err) => console.warn('failed to clear chat history', err));
         }
     };
 
