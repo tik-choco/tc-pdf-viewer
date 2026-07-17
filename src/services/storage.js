@@ -10,7 +10,14 @@ export async function initMist() {
 
 function getFilesIndex() {
     const saved = localStorage.getItem('mist_files_index');
-    return saved ? JSON.parse(saved) : [];
+    if (!saved) return [];
+    try {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+        console.warn('failed to parse mist_files_index', error);
+        return [];
+    }
 }
 
 function saveFileToIndex(name, cid, folder) {
@@ -27,7 +34,13 @@ function saveFileToIndex(name, cid, folder) {
 }
 
 function getOcrMarkdownIndex() {
-    return JSON.parse(localStorage.getItem('mist_ocr_markdown_index') || '{}');
+    try {
+        const parsed = JSON.parse(localStorage.getItem('mist_ocr_markdown_index') || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+        console.warn('failed to parse mist_ocr_markdown_index', error);
+        return {};
+    }
 }
 
 // Persists the index locally (small pointer records only, per-entry bodies
@@ -56,7 +69,13 @@ export async function saveOcrMarkdownIndex(index) {
 }
 
 function getTranslatedMarkdownIndex() {
-    return JSON.parse(localStorage.getItem('mist_translated_markdown_index') || '{}');
+    try {
+        const parsed = JSON.parse(localStorage.getItem('mist_translated_markdown_index') || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+        console.warn('failed to parse mist_translated_markdown_index', error);
+        return {};
+    }
 }
 
 export async function saveTranslatedMarkdownIndex(index) {
@@ -165,18 +184,28 @@ export async function prefetchPdf(name) {
     }
 }
 
+export function getExplanationsIndex() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem('mist_explanations_index') || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+        console.warn('failed to parse mist_explanations_index', error);
+        return {};
+    }
+}
+
 export async function saveExplanation(text, explanation) {
     await initMist();
     const cid = await storage_add(text, new TextEncoder().encode(explanation));
-    
-    const index = JSON.parse(localStorage.getItem('mist_explanations_index') || '{}');
+
+    const index = getExplanationsIndex();
     index[text] = cid;
     localStorage.setItem('mist_explanations_index', JSON.stringify(index));
 }
 
 export async function getExplanation(text) {
     await initMist();
-    const index = JSON.parse(localStorage.getItem('mist_explanations_index') || '{}');
+    const index = getExplanationsIndex();
     const cid = index[text];
     if (!cid) return null;
     
@@ -326,6 +355,13 @@ export async function migrateMarkdownIndexesToCid() {
                 } catch (error) {
                     console.warn(`failed to migrate OCR markdown for "${pdfName}" to CID`, error);
                 }
+            } else if (typeof entry === 'string' && entry) {
+                // Oldest legacy format: the index entry itself is a bare CID
+                // string. Normalize to the object shape so cross-app readers
+                // (e.g. tc-note's importDocument) that expect `{cid}` don't
+                // skip it.
+                ocrIndex[pdfName] = { cid: entry, updatedAt: Date.now() };
+                changed = true;
             }
         }
         if (changed) await saveOcrMarkdownIndex(ocrIndex);
@@ -348,6 +384,12 @@ export async function migrateMarkdownIndexesToCid() {
                     } catch (error) {
                         console.warn(`failed to migrate translated markdown for "${pdfName}/${lang}" to CID`, error);
                     }
+                } else if (typeof entry === 'string' && entry) {
+                    // Oldest legacy format: the per-language entry itself is
+                    // a bare CID string. Normalize to `{cid}` for the same
+                    // reason as the OCR index above.
+                    langs[lang] = { cid: entry, updatedAt: Date.now() };
+                    changed = true;
                 }
             }
         }

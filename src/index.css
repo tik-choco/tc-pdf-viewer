@@ -1133,6 +1133,282 @@ button:not(:disabled):active {
   color: var(--danger);
 }
 
+.current-connection-line {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
+}
+
+.current-connection-line.is-set {
+  color: var(--text-main);
+  border-color: var(--primary-soft);
+}
+
+.current-connection-line.is-unset {
+  color: var(--text-muted);
+}
+
+.preset-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.preset-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: var(--transition);
+  max-width: 100%;
+}
+
+.preset-chip:hover {
+  border-color: var(--primary-soft);
+  background: var(--bg-hover);
+}
+
+.preset-chip.is-default {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.preset-chip-star {
+  flex-shrink: 0;
+}
+
+.preset-chip-label {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preset-chip-model {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.preset-chip.is-default .preset-chip-model {
+  color: inherit;
+  opacity: 0.8;
+}
+
+.preset-chip.is-editing {
+  box-shadow: 0 0 0 2px var(--primary-soft-strong);
+}
+
+.preset-chip-add {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.preset-chip-add.is-active {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.preset-chip-remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.preset-chip-remove:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.connection-form {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.connection-form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connection-form-grid input {
+  min-width: 0;
+}
+
+.connection-form-model-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.connection-form-model-field select,
+.connection-form-model-field input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.connection-form-mode-toggle {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--primary);
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: underline;
+}
+
+.connection-form-mode-toggle:hover {
+  color: var(--secondary);
+}
+
+.connection-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.connection-form-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: var(--transition);
+  flex: 1 1 auto;
+  white-space: nowrap;
+}
+
+.connection-form-btn:hover {
+  color: var(--text-main);
+  background: var(--bg-hover);
+}
+
+.connection-form-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.connection-form-btn-primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+}
+
+.connection-form-btn-primary:hover {
+  background: var(--secondary);
+  color: var(--on-primary);
+}
+
+.connection-form-warning {
+  font-style: italic;
+  margin-top: -6px;
+}
+
+/* 接続方式トグル（直接API接続 / AI Network）— tc-lingo の
+   .connection-mode-toggle/-button と同じ見た目のセグメントコントロール。 */
+.connection-mode-toggle {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.connection-mode-button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-pill);
+  padding: 7px 14px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.connection-mode-button:hover {
+  background: var(--bg-hover);
+  color: var(--text-main);
+}
+
+.connection-mode-button-active {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.connection-mode-button-active:hover {
+  background: var(--secondary);
+  color: var(--on-primary);
+}
+
+.settings-section-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 16px 0;
+}
+
+.settings-advanced {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.settings-advanced summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-weight: 600;
+  padding: 4px 0;
+  user-select: none;
+}
+
+.settings-advanced summary:hover {
+  color: var(--text-main);
+}
+
+.settings-advanced-body {
+  margin-top: 12px;
+}
+
 .checkbox-label {
   display: flex;
   align-items: center;
