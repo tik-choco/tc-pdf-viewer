@@ -4,7 +4,7 @@ import PdfViewer from './components/PdfViewer';
 import MarkdownViewer from './components/MarkdownViewer';
 import Tooltip from './components/Tooltip';
 import Chat from './components/Chat';
-import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, saveOcrMarkdownSummary, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveOcrMarkdownIndex, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot, saveTranslatedMarkdownIndex, migrateMarkdownIndexesToCid } from './services/storage';
+import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, saveOcrMarkdownSummary, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveOcrMarkdownIndex, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot, saveTranslatedMarkdownIndex, migrateMarkdownIndexesToCid, getExplanationsIndex } from './services/storage';
 import { scheduleDriveExport } from './services/driveExport';
 import { extractText, renderPdfPagesToImages } from './services/pdf';
 import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown, summarizeOcrMarkdown, getNetworkRoomId } from './services/ai';
@@ -205,7 +205,7 @@ export function App() {
 
   const syncState = useMemo(() => ({
     files: pdfs,
-    explanations: JSON.parse(localStorage.getItem('mist_explanations_index') || '{}'),
+    explanations: getExplanationsIndex(),
     ocrMarkdown: ocrMarkdownIndex,
     translatedMarkdown: translatedMarkdownIndex,
     aiSettings: currentAiSettings,

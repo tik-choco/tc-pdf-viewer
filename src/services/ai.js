@@ -370,6 +370,43 @@ export function setDefaultLlmPresetIdIfEmpty(id) {
     saveLlmConfig(config);
 }
 
+// Combined "接続を追加" helper used by the unified SettingsPanel connection
+// form: creates a provider and a preset for it in a single load/save cycle
+// (via the merge-never-delete ensureProvider/ensurePreset), and sets the new
+// preset as the default preset if none is set yet. baseUrl+model are
+// required; label/apiKey may be empty (label falls back to the model name via
+// ensurePreset, apiKey empty is valid for keyless local LLMs).
+export function addConnection({ label, baseUrl, apiKey, model, reasoningEffort } = {}) {
+    const trimmedBaseUrl = (baseUrl || '').trim().replace(/\/$/, '');
+    const trimmedModel = (model || '').trim();
+    if (!trimmedBaseUrl || !trimmedModel) return '';
+
+    const config = getSharedLlmConfig();
+    const providerId = ensureProvider(config, {
+        label: label || undefined,
+        baseUrl: trimmedBaseUrl,
+        apiKey: apiKey || '',
+    });
+    const presetId = ensurePreset(config, {
+        label: label || trimmedModel,
+        providerId,
+        model: trimmedModel,
+        reasoningEffort: reasoningEffort && reasoningEffort !== 'none' ? reasoningEffort : undefined,
+    });
+    if (!config.defaultPresetId) config.defaultPresetId = presetId;
+    saveLlmConfig(config);
+    return presetId;
+}
+
+// Resolves the shared config's default preset to a concrete connection
+// target (or null if unset/unresolvable), for the SettingsPanel's "現在の接続
+// 先" summary line. Accepts an already-loaded config to avoid a redundant
+// read when the caller already has one (e.g. SettingsPanel's sharedConfig
+// state).
+export function resolveDefaultLlmTarget(config = getSharedLlmConfig()) {
+    return resolvePreset(config);
+}
+
 // Resolves the connection/model to use for `task`, falling back to the
 // 'chat' task's preset and then the shared default preset (see
 // docs/data-contracts/docs/llm-config.md "解決規則").
@@ -728,7 +765,7 @@ export async function chatAi(messages, task = 'chat', options = {}) {
     const resolved = resolveTaskTarget(settings, task);
     if (!resolved) throw new Error('AIモデルが設定されていません。AI設定でプリセットを選択してください。');
     if (!resolved.baseUrl) throw new Error('AI Base URLが設定されていません。');
-    if (!resolved.apiKey) throw new Error('APIキーが設定されていません。');
+    // apiKey は必須にしない: ローカルLLM(Ollama/LM Studio等)はキーなしで動く。
     if (!resolved.model) throw new Error('AIモデルが設定されていません。AI設定でモデルを選択してください。');
 
     if (options.signal?.aborted) {
@@ -824,7 +861,6 @@ export async function getAvailableModels({ baseUrl, apiKey } = {}) {
         console.warn('AI Base URL is empty.');
         return [];
     }
-    if (!apiKey) return [];
 
     try {
         const models = await fetchModels({ baseUrl: normalizedBaseUrl, apiKey });
@@ -851,7 +887,6 @@ export async function getAvailableModels({ baseUrl, apiKey } = {}) {
 export async function streamUpstreamChatCompletion(messages, model, onDelta) {
     const resolved = resolveUpstreamProviderTarget();
     if (!resolved || !resolved.baseUrl) throw new Error('AI Base URLが設定されていません。');
-    if (!resolved.apiKey) throw new Error('APIキーが設定されていません。');
 
     const resolvedModel = (model || resolved.model || '').trim();
     if (!resolvedModel) throw new Error('AIモデルが設定されていません。');
@@ -880,7 +915,6 @@ export async function streamUpstreamChatCompletion(messages, model, onDelta) {
 export async function testAiConnection({ baseUrl, apiKey } = {}) {
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl || '');
     if (!normalizedBaseUrl) throw new Error('AI Base URLが設定されていません。');
-    if (!apiKey) throw new Error('APIキーが設定されていません。');
 
     try {
         const models = await fetchModels({ baseUrl: normalizedBaseUrl, apiKey });

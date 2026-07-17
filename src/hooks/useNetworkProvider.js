@@ -27,7 +27,8 @@ export function useNetworkProvider({ networkProviderEnabled, roomId }) {
     // 'chat' タスクに割り当てられたプリセット(未割当なら既定プリセット)の接続先を、
     // アップストリームとして提供する。
     const target = resolveUpstreamProviderTarget();
-    const upstreamConfigured = Boolean(target?.baseUrl && target?.apiKey && target?.model);
+    // apiKey は問わない(キーなしのローカルLLMをアップストリームにできる)。
+    const upstreamConfigured = Boolean(target?.baseUrl && target?.model);
 
     useEffect(() => {
         if (!networkProviderEnabled || !trimmedRoomId || !upstreamConfigured) {
