@@ -885,175 +885,6 @@ button:not(:disabled):active {
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.base-url-add-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.base-url-add-row input {
-  min-width: 0;
-}
-
-.base-url-add-row .icon-form-btn {
-  grid-column: 2;
-  grid-row: 1 / span 3;
-  height: 100%;
-}
-
-.icon-form-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 8px;
-  background: var(--border);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.icon-form-btn:hover {
-  color: var(--text-main);
-  background: var(--border);
-}
-
-.icon-form-btn.is-danger:hover {
-  color: var(--danger);
-  border-color: var(--danger-border);
-  background: var(--danger-soft);
-}
-
-.icon-form-btn:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-}
-
-.base-url-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.base-url-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  gap: 8px;
-  align-items: center;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-}
-
-.base-url-item input {
-  min-width: 0;
-  padding: 7px 10px;
-  font-size: 0.78rem;
-}
-
-.base-url-item .icon-form-btn {
-  grid-column: 2;
-  grid-row: 1 / span 3;
-  height: 100%;
-}
-
-.base-url-actions {
-  grid-column: 2;
-  grid-row: 1 / span 3;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  height: 100%;
-}
-
-.base-url-actions .icon-form-btn {
-  grid-column: auto;
-  grid-row: auto;
-  flex: 1;
-  width: 34px;
-  height: auto;
-}
-
-.base-url-item-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.preset-add-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.preset-add-row input,
-.preset-add-row select {
-  min-width: 0;
-}
-
-.preset-add-row .icon-form-btn {
-  grid-column: 2;
-  grid-row: 1 / span 4;
-  height: 100%;
-}
-
-.preset-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 12px;
-}
-
-.preset-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
-  gap: 8px;
-  align-items: center;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-}
-
-.preset-item.is-default {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 1px var(--primary-soft);
-}
-
-.preset-item input,
-.preset-item select {
-  min-width: 0;
-  padding: 7px 10px;
-  font-size: 0.78rem;
-}
-
-.preset-actions {
-  grid-column: 2;
-  grid-row: 1 / span 4;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  height: 100%;
-}
-
-.preset-actions .icon-form-btn {
-  flex: 1;
-  width: 34px;
-  height: auto;
-}
-
-.preset-default-btn.is-active {
-  color: var(--primary);
-  border-color: var(--primary);
-  background: var(--primary-soft);
-}
-
 .task-model-item {
   display: grid;
   grid-template-columns: 60px minmax(0, 1fr);
@@ -1085,20 +916,12 @@ button:not(:disabled):active {
 }
 
 .task-model-field {
-  display: grid;
-  grid-template-columns: 56px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
+  display: block;
   min-width: 0;
 }
 
-.task-model-field label {
-  font-size: 0.68rem;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
 .task-model-field select {
+  width: 100%;
   min-width: 0;
 }
 
@@ -1121,83 +944,100 @@ button:not(:disabled):active {
   transform: translateY(-1px);
 }
 
-.settings-test-result {
-  margin-top: 8px;
-  font-size: 0.78rem;
-  line-height: 1.4;
-  color: var(--text-muted);
-  overflow-wrap: anywhere;
-}
-
-.settings-test-result .error {
-  color: var(--danger);
-}
-
-.current-connection-line {
-  font-size: 0.78rem;
-  line-height: 1.5;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  margin: 0 0 16px;
-  overflow-wrap: anywhere;
-}
-
-.current-connection-line.is-set {
-  color: var(--text-main);
-  border-color: var(--primary-soft);
-}
-
-.current-connection-line.is-unset {
-  color: var(--text-muted);
-}
-
-.preset-chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.preset-chip {
+/* 接続先（Provider）とモデル（Preset）は互いに独立したグリッドカード一覧。
+   階層関係にはしない（片方を開いてももう片方はネストして出さない）。見出し
+   ＋グリッドのみで、2セクションを区別するためだけにカードの背景色を分ける。 */
+.server-list-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.server-list-header label {
+  margin-bottom: 0;
+}
+
+.server-list-header .connection-form-btn {
+  flex: 0 0 auto;
+  width: auto;
+}
+
+.settings-flat-section {
+  margin-bottom: 16px;
+}
+
+.model-row-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* サイドバーの狭い横幅ではauto-fillが自然に1〜2カラムに収まる想定。カラム数
+   は固定しない。 */
+.model-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 6px;
-  padding: 7px 10px;
-  border-radius: 999px;
-  background: var(--surface-2);
+  padding: 10px 26px 10px 10px;
+  border-radius: var(--radius-s);
   border: 1px solid var(--border);
-  color: var(--text-main);
-  font-size: 0.78rem;
-  cursor: pointer;
-  transition: var(--transition);
-  max-width: 100%;
+  background: var(--surface-1, var(--surface));
+  box-shadow: var(--shadow-1);
+  transition: background var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease),
+    transform var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease);
 }
 
-.preset-chip:hover {
-  border-color: var(--primary-soft);
+.model-row:hover {
   background: var(--bg-hover);
+  box-shadow: var(--shadow-2);
+  transform: translateY(-1px);
 }
 
-.preset-chip.is-default {
-  border-color: var(--primary);
+/* 接続先/モデル、それぞれのセクションのtintをカード単位に適用する（前ラウン
+   ドはセクション全体の背景だったが、グリッドカード化に伴いカード自体に
+   移した）。色は既存パターンを踏襲: connectionは .inline-add-folder と同じ
+   「アクセント寄りのごく薄いtint」(--primary-soft)、modelsはカードの周囲の
+   背景(--surface-2)からもう一段くすませた --surface-3（ライト/ダーク双方で
+   周囲との差が付くようテーマ定義側で調整済みの変数）。 */
+.settings-flat-section-connection .model-row {
   background: var(--primary-soft);
-  color: var(--primary);
 }
 
-.preset-chip-star {
-  flex-shrink: 0;
+.settings-flat-section-models .model-row {
+  background: var(--surface-3);
 }
 
-.preset-chip-label {
+.model-row-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.model-row-label {
+  max-width: 100%;
+  font-size: 0.82rem;
   font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.preset-chip-model {
+.model-row-model {
+  max-width: 100%;
   color: var(--text-muted);
   font-size: 0.72rem;
   white-space: nowrap;
@@ -1205,24 +1045,62 @@ button:not(:disabled):active {
   text-overflow: ellipsis;
 }
 
-.preset-chip.is-default .preset-chip-model {
-  color: inherit;
-  opacity: 0.8;
-}
-
-.preset-chip.is-editing {
-  box-shadow: 0 0 0 2px var(--primary-soft-strong);
-}
-
-.preset-chip-add {
-  border-style: dashed;
+/* モデル行に添える接続先名（どのproviderに属すか）。ネストではなく単なる
+   ラベルとして小さく併記する。 */
+.model-row-provider {
+  max-width: 100%;
   color: var(--text-muted);
+  font-size: 0.68rem;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.preset-chip-add.is-active {
-  border-color: var(--primary);
-  color: var(--primary);
+.model-row-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.task-badge {
   background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 0.62rem;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: var(--radius-pill);
+  white-space: nowrap;
+}
+
+/* カード右上に置く×削除。カード本体側の padding-right（26px）がテキストと
+   重ならない余白を確保している。 */
+.model-row-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  flex-shrink: 0;
+}
+
+/* 編集/追加状態のカードはグリッド上の自分の位置のまま全幅に展開する
+   （他のカードはグリッドに残る）。前ラウンドまでの縦積みリスト用スタイルを
+   そのままフォームレイアウトとして使う。 */
+.model-row.model-row-editing {
+  grid-column: 1 / -1;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 10px;
+  box-shadow: none;
+  transform: none;
+}
+
+.model-row-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .preset-chip-remove {
@@ -1242,24 +1120,6 @@ button:not(:disabled):active {
   background: var(--danger-soft);
 }
 
-.connection-form {
-  margin-top: 8px;
-  padding: 12px;
-  border-radius: 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-}
-
-.connection-form-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.connection-form-grid input {
-  min-width: 0;
-}
-
 .connection-form-model-field {
   display: flex;
   align-items: center;
@@ -1272,27 +1132,41 @@ button:not(:disabled):active {
   min-width: 0;
 }
 
-.connection-form-mode-toggle {
-  flex-shrink: 0;
-  background: none;
-  border: none;
-  padding: 0;
-  color: var(--primary);
-  font-size: 0.72rem;
-  cursor: pointer;
-  white-space: nowrap;
-  text-decoration: underline;
-}
-
-.connection-form-mode-toggle:hover {
-  color: var(--secondary);
-}
-
-.connection-form-actions {
+.model-row-add-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
+}
+
+/* グリッド末尾の「追加」タイル。破線枠でカードと区別する。クリックすると
+   同じグリッド位置がそのままrenderAdd*Row()の展開フォーム（.model-row-editing、
+   grid-column: 1/-1）に差し替わる。 */
+.grid-add-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 64px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.grid-add-tile:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--bg-hover);
+}
+
+.grid-add-tile:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .connection-form-btn {
@@ -1384,29 +1258,6 @@ button:not(:disabled):active {
   border: none;
   border-top: 1px solid var(--border);
   margin: 16px 0;
-}
-
-.settings-advanced {
-  margin-top: 4px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-}
-
-.settings-advanced summary {
-  cursor: pointer;
-  font-size: 0.78rem;
-  color: var(--text-muted);
-  font-weight: 600;
-  padding: 4px 0;
-  user-select: none;
-}
-
-.settings-advanced summary:hover {
-  color: var(--text-main);
-}
-
-.settings-advanced-body {
-  margin-top: 12px;
 }
 
 .checkbox-label {
