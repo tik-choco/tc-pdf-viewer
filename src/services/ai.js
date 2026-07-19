@@ -17,6 +17,7 @@ import {
     saveLlmConfig,
     subscribeLlmConfig,
 } from './llmConfig';
+import { advertisedModelName, isNetworkProviderBaseUrl } from './networkModels';
 
 export { subscribeLlmConfig };
 
@@ -32,6 +33,13 @@ const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 const AI_SETTINGS_KEY = 'tc-pdf-viewer-ai-settings-v1';
 const LEGACY_AI_SETTINGS_KEY = 'ai_settings';
 
+const DEFAULT_TASK_REASONING_EFFORTS = {
+    explain: 'none',
+    translate: 'none',
+    chat: 'none',
+    ocr: 'none'
+};
+
 const DEFAULT_SETTINGS = {
     backend: 'http',
     networkProviderEnabled: false,
@@ -41,6 +49,16 @@ const DEFAULT_SETTINGS = {
         chat: '',
         ocr: ''
     },
+    // Ids (in the shared llm config) of presets shared to the LLM Network
+    // when networkProviderEnabled; their advertised names (label, falling
+    // back to model id - see advertisedModelName in ./networkModels.js) are
+    // announced via provider_hello.models, and incoming requests naming one
+    // route to that preset's own connection (see
+    // streamNetworkProviderChatCompletion below / spec §4.2/§4.5).
+    networkProviderPresetIds: [],
+    // Per-task reasoning_effort, always sent with the request ('none' is an
+    // explicit value, not "omit the field" - see chatAi below).
+    taskReasoningEfforts: { ...DEFAULT_TASK_REASONING_EFFORTS },
     promptTemplate: '以下の用語や文章を簡潔に、かつ専門的に解説してください:\n\n"{text}"',
     targetLanguages: ['日本語', 'English', '中国語', '韓国語', 'スペイン語']
 };
@@ -58,6 +76,16 @@ function normalizeAiSettings(settings) {
         taskPresetIds[task] = typeof value === 'string' ? value : '';
     });
 
+    const networkProviderPresetIds = Array.isArray(merged.networkProviderPresetIds)
+        ? merged.networkProviderPresetIds.filter((id) => typeof id === 'string')
+        : [];
+
+    const taskReasoningEfforts = { ...DEFAULT_TASK_REASONING_EFFORTS };
+    AI_TASKS.forEach((task) => {
+        const value = merged.taskReasoningEfforts?.[task];
+        taskReasoningEfforts[task] = REASONING_EFFORT_OPTIONS.includes(value) ? value : 'none';
+    });
+
     const promptTemplate = typeof merged.promptTemplate === 'string' && merged.promptTemplate
         ? merged.promptTemplate
         : DEFAULT_SETTINGS.promptTemplate;
@@ -65,7 +93,15 @@ function normalizeAiSettings(settings) {
         ? merged.targetLanguages
         : DEFAULT_SETTINGS.targetLanguages;
 
-    return { backend, networkProviderEnabled, taskPresetIds, promptTemplate, targetLanguages };
+    return {
+        backend,
+        networkProviderEnabled,
+        taskPresetIds,
+        networkProviderPresetIds,
+        taskReasoningEfforts,
+        promptTemplate,
+        targetLanguages
+    };
 }
 
 // ---------------------------------------------------------------------------
@@ -274,6 +310,42 @@ export function saveAiSettings(settings) {
 }
 
 // ---------------------------------------------------------------------------
+// networkProviderPresetIds / taskReasoningEfforts accessors. Both are plain
+// app-local ai-settings fields (see DEFAULT_SETTINGS above); these just save a
+// round-trip of the whole settings object at call sites that only touch one
+// field, mirroring the style of the shared-config setters below (e.g.
+// setNetworkRoomId: load, patch, save).
+// ---------------------------------------------------------------------------
+
+/** Ids of presets currently checked to share to the LLM Network (see hooks/useNetworkProvider.js). */
+export function getNetworkProviderPresetIds() {
+    return getAiSettings().networkProviderPresetIds;
+}
+
+export function setNetworkProviderPresetIds(ids) {
+    const settings = getAiSettings();
+    saveAiSettings({
+        ...settings,
+        networkProviderPresetIds: Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : []
+    });
+}
+
+/** @param {string} task @returns {string} one of REASONING_EFFORT_OPTIONS, default 'none'. */
+export function getTaskReasoningEffort(task) {
+    return getAiSettings().taskReasoningEfforts[task] ?? 'none';
+}
+
+/** @param {string} task @param {string} effort must be one of REASONING_EFFORT_OPTIONS; anything else is stored as 'none'. */
+export function setTaskReasoningEffort(task, effort) {
+    const settings = getAiSettings();
+    const taskReasoningEfforts = {
+        ...settings.taskReasoningEfforts,
+        [task]: REASONING_EFFORT_OPTIONS.includes(effort) ? effort : 'none'
+    };
+    saveAiSettings({ ...settings, taskReasoningEfforts });
+}
+
+// ---------------------------------------------------------------------------
 // Shared LLM config (tc-shared-llm-config-v1) accessors/mutators used by
 // SettingsPanel/Onboarding for the providers/presets editors and the network
 // room id. All mutations go through the vendored ensureProvider/ensurePreset
@@ -423,6 +495,123 @@ function resolveTaskTarget(settings, task) {
 // (see hooks/useNetworkProvider.js) and by Onboarding to prefill/test.
 export function resolveUpstreamProviderTarget() {
     return resolveTaskTarget(getAiSettings(), 'chat');
+}
+
+/**
+ * Resolves `presetIds` (the presets the user checked to share, see
+ * getNetworkProviderPresetIds/DEFAULT_SETTINGS.networkProviderPresetIds)
+ * against the shared llm config. Drops ids that no longer resolve, ids whose
+ * resolution silently fell back to the shared default preset (see
+ * resolvePreset's fallback - this guards against re-sharing the default
+ * preset under a stale/removed id), and any target whose baseUrl is itself a
+ * `mist-network://` pseudo-provider - re-advertising a network-imported
+ * preset would loop traffic straight back into the room it came from (spec
+ * llm-settings-common-v1.md §4.2/§4.5).
+ *
+ * @param {import('./llmConfig').SharedLlmConfigV1} [config]
+ * @param {string[]} [presetIds]
+ * @returns {import('./llmConfig').ResolvedLlmTargetV1[]}
+ */
+export function resolveSharedNetworkTargets(config = getSharedLlmConfig(), presetIds = getNetworkProviderPresetIds()) {
+    const targets = [];
+    for (const id of presetIds) {
+        const resolved = resolvePreset(config, id);
+        if (!resolved || resolved.presetId !== id) continue;
+        if (isNetworkProviderBaseUrl(resolved.baseUrl)) continue;
+        targets.push(resolved);
+    }
+    return targets;
+}
+
+/**
+ * The advertised names (see advertisedModelName in ./networkModels.js) of the
+ * currently shared presets, deduped. This is what provider_hello.models
+ * carries - see MistllmProvider.start()/updateModels() in ./mistllm.js and
+ * their wiring in hooks/useNetworkProvider.js.
+ *
+ * @param {import('./llmConfig').SharedLlmConfigV1} [config]
+ * @param {string[]} [presetIds]
+ * @returns {string[]}
+ */
+export function getAdvertisedNetworkModels(config = getSharedLlmConfig(), presetIds = getNetworkProviderPresetIds()) {
+    return [...new Set(resolveSharedNetworkTargets(config, presetIds).map(advertisedModelName))];
+}
+
+/**
+ * Streams a chat completion via a specific resolved shared-config target
+ * (baseUrl/apiKey/model/temperature/reasoningEffort already merged - see
+ * resolvePreset in llmConfig.js). Mirrors the OpenAIConfig building done
+ * elsewhere in this file (chatAi's HTTP branch, streamUpstreamChatCompletion
+ * below); used by streamNetworkProviderChatCompletion to forward a named
+ * llm_request to the specific shared preset it matched, instead of the single
+ * default ('chat' task) upstream streamUpstreamChatCompletion always uses.
+ *
+ * @param {import('./llmConfig').ResolvedLlmTargetV1} target
+ * @param {import('@tik-choco/mistai').ChatMessage[]} messages
+ * @param {(delta: string) => void} [onDelta]
+ * @returns {Promise<string>}
+ */
+async function streamResolvedChatCompletion(target, messages, onDelta) {
+    let result;
+    try {
+        result = await streamChatCompletion(
+            {
+                baseUrl: target.baseUrl,
+                apiKey: target.apiKey,
+                model: target.model,
+                reasoningEffort: target.reasoningEffort || 'none',
+                ...(target.temperature !== undefined ? { temperature: target.temperature } : {}),
+            },
+            messages,
+            onDelta,
+        );
+    } catch (err) {
+        throw localizeUpstreamError(err);
+    }
+    if (!result.trim()) throw new Error('プロバイダの応答が空でした。');
+    return result;
+}
+
+/**
+ * callLlm injected into MistllmProvider.start()/updateModels() (see
+ * hooks/useNetworkProvider.js) - implements the provider-side share policy
+ * (spec llm-settings-common-v1.md §4.5):
+ *
+ *  - model given, matches one of the currently shared presets' advertised
+ *    names (see resolveSharedNetworkTargets/advertisedModelName) -> served via
+ *    THAT preset's own connection, with the model rewritten to its real id.
+ *  - model given, doesn't match, but at least one preset IS currently shared
+ *    -> rejected. The thrown Error becomes an llm_error reply (see
+ *    @tik-choco/mistai's ProviderService.handleMessage, which catches and
+ *    relays callLlm rejections verbatim) so a consumer can't keep using a
+ *    model name the user just un-shared.
+ *  - model given but nothing is shared right now (legacy single-upstream
+ *    mode), or no model given at all -> falls back to
+ *    streamUpstreamChatCompletion (the 'chat' task's default upstream),
+ *    forwarding the requested name as-is - unchanged legacy behavior.
+ *
+ * The share list/config are re-read on every call (not captured at start()
+ * time), so edits to the share checklist take effect on the very next
+ * request even before the hello re-send (MistllmProvider.updateModels)
+ * reaches the peer.
+ *
+ * @param {import('@tik-choco/mistai').ChatMessage[]} messages
+ * @param {string | undefined} model
+ * @param {(delta: string) => void} onDelta
+ * @returns {Promise<string>}
+ */
+export async function streamNetworkProviderChatCompletion(messages, model, onDelta) {
+    const targets = resolveSharedNetworkTargets();
+
+    if (model) {
+        const matched = targets.find((target) => advertisedModelName(target) === model);
+        if (matched) return await streamResolvedChatCompletion(matched, messages, onDelta);
+        if (targets.length > 0) {
+            throw new Error('The requested model is not shared by this provider.');
+        }
+    }
+
+    return await streamUpstreamChatCompletion(messages, model, onDelta);
 }
 
 const explanationCache = new Map();
@@ -732,7 +921,12 @@ function localizeUpstreamError(err) {
     }
     return new Error(formatMistaiError(err, MESSAGES_JA));
 }
-async function chatAiViaMistllm(settings, messages, task, options) {
+// Sends a chat request over the mistllm room to whichever provider answers
+// (see MistllmConsumer.chat in ./mistllm.js). `model`, if given, is the
+// advertised name (see ./networkModels.js advertisedModelName) the request is
+// explicitly naming - omitted, the room's provider answers with whatever it
+// has configured as its own default (see chatAi below for when each applies).
+async function chatAiViaMistllmRoom(messages, model, options) {
     const roomId = getNetworkRoomId();
     if (!roomId) throw new Error('Mist LLM Room IDが設定されていません。');
 
@@ -743,9 +937,8 @@ async function chatAiViaMistllm(settings, messages, task, options) {
     // chat() internally awaits waitForProvider() (10s timeout) if a provider
     // hasn't announced itself yet, so no extra wait is needed here.
 
-    const resolved = resolveTaskTarget(settings, task);
     const result = await consumer.chat(messages, {
-        model: resolved?.model || undefined,
+        model: model || undefined,
         onChunk: options.onDelta,
         signal: options.signal,
         timeoutMs: options.timeoutMs || DEFAULT_TIMEOUT_MS,
@@ -757,16 +950,39 @@ const DEFAULT_TIMEOUT_MS = 30000;
 
 export async function chatAi(messages, task = 'chat', options = {}) {
     const settings = getAiSettings();
+    const resolved = resolveTaskTarget(settings, task);
 
-    if (settings.backend === 'mistllm') {
-        return await chatAiViaMistllm(settings, messages, task, options);
+    // Per-task network routing (spec llm-settings-common-v1.md §2.4/§4.5): a
+    // task whose resolved preset itself lives on the mist-network:// pseudo
+    // provider (the user explicitly picked one of a room's advertised models
+    // for this task - see ./networkModels.js) always goes over the network
+    // transport, named by that preset's model (its advertised name) -
+    // regardless of this device's own global backend setting. This lets a
+    // single task "borrow" a room's model while everything else still uses
+    // this device's own HTTP backend.
+    if (resolved && isNetworkProviderBaseUrl(resolved.baseUrl)) {
+        return await chatAiViaMistllmRoom(messages, resolved.model, options);
     }
 
-    const resolved = resolveTaskTarget(settings, task);
+    if (settings.backend === 'mistllm') {
+        // Global network backend with no per-task network-preset override:
+        // omit the model so the room's provider answers with whatever it has
+        // configured as its own default (legacy single-upstream consumer
+        // behavior). Forcing this device's own HTTP task model name onto the
+        // wire here would risk either a mismatched upstream model or (now
+        // that providers can advertise + reject a share list, see
+        // streamNetworkProviderChatCompletion in this file) an outright
+        // "not shared" rejection.
+        return await chatAiViaMistllmRoom(messages, undefined, options);
+    }
+
     if (!resolved) throw new Error('AIモデルが設定されていません。AI設定でプリセットを選択してください。');
     if (!resolved.baseUrl) throw new Error('AI Base URLが設定されていません。');
     // apiKey は必須にしない: ローカルLLM(Ollama/LM Studio等)はキーなしで動く。
     if (!resolved.model) throw new Error('AIモデルが設定されていません。AI設定でモデルを選択してください。');
+    // 常時送信のtask別reasoning_effort（未設定タスクはpresetのreasoningEffortへ、
+    // それも無ければ'none'へフォールバック）。'none'は「送らない」ではなく明示値。
+    const reasoningEffort = settings.taskReasoningEfforts?.[task] ?? resolved.reasoningEffort ?? 'none';
 
     if (options.signal?.aborted) {
         const error = new Error('Request cancelled.');
@@ -797,7 +1013,7 @@ export async function chatAi(messages, task = 'chat', options = {}) {
                 baseUrl: resolved.baseUrl,
                 apiKey: resolved.apiKey,
                 model: resolved.model,
-                reasoningEffort: resolved.reasoningEffort || 'none',
+                reasoningEffort,
                 ...(resolved.temperature !== undefined ? { temperature: resolved.temperature } : {}),
             },
             messages,
@@ -859,6 +1075,13 @@ export async function getAvailableModels({ baseUrl, apiKey } = {}) {
     const normalizedBaseUrl = normalizeBaseUrl(baseUrl || '');
     if (!normalizedBaseUrl) {
         console.warn('AI Base URL is empty.');
+        return [];
+    }
+    if (isNetworkProviderBaseUrl(normalizedBaseUrl)) {
+        // mist-network:// pseudo-providers (see ./networkModels.js) aren't
+        // real HTTP endpoints - there's nothing to fetch. Their "model list"
+        // is whatever the consumer mirror sync (hooks/useNetworkModelSync.js)
+        // has already mirrored in as presets under this provider row.
         return [];
     }
 

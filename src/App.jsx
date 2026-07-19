@@ -12,6 +12,7 @@ import { PanelLeftClose, PanelLeftOpen, MessageCircle, RefreshCw, FileText, X } 
 import { useSync } from './hooks/useSync';
 import { useNetworkConsumerConnection } from './hooks/useNetworkConsumerConnection';
 import { useNetworkProvider } from './hooks/useNetworkProvider';
+import { useNetworkModelSync } from './hooks/useNetworkModelSync';
 import { SyncPanel } from './components/SyncPanel';
 import { DiffConfirmPanel } from './components/DiffConfirmPanel';
 import { QRPanel } from './components/QRPanel';
@@ -224,6 +225,15 @@ export function App() {
   });
   useNetworkProvider({
     networkProviderEnabled: currentAiSettings.networkProviderEnabled,
+    roomId: networkRoomId,
+    networkProviderPresetIds: currentAiSettings.networkProviderPresetIds,
+  });
+  // Mirrors the connected room's advertised models into the shared llm
+  // config as ordinary presets (see hooks/useNetworkModelSync.js / spec
+  // llm-settings-common-v1.md §4.4). Also runs independent of whether
+  // SettingsPanel is mounted, same reasoning as the two hooks above.
+  useNetworkModelSync({
+    backend: currentAiSettings.backend,
     roomId: networkRoomId,
   });
 
