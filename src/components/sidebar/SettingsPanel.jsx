@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Network, Plus, Server, Sparkles, X } from 'lucide-preact';
+import { Plus, Sparkles, X } from 'lucide-preact';
 import {
     AI_TASKS,
+    REASONING_EFFORT_OPTIONS,
     getAiSettings,
     saveAiSettings,
     getSharedLlmConfig,
@@ -15,33 +16,50 @@ import {
     setDefaultLlmPresetId,
     setNetworkRoomId,
     getAvailableModels,
+    getTaskReasoningEffort,
+    setTaskReasoningEffort,
 } from '../../services/ai';
+import { isNetworkProviderBaseUrl } from '../../services/networkModels';
 import { requestOnboarding } from '../../services/onboarding';
 import { MESSAGES_JA } from '@tik-choco/mistai';
 import { ConsumerStatusIndicator, ProviderStatusPanel } from '@tik-choco/mistai/preact';
 import { useMistllm } from '../../hooks/useMistllm';
 import { useNetworkProvider } from '../../hooks/useNetworkProvider';
 
+// 4-tab layout (see tc-docs/drafts/llm-settings-common-v1.md §3): AI接続 /
+// AI Network / タスク / はじめに. AI Network was briefly folded into AI接続
+// as a 接続方式 toggle; it's now its own tab again (mirroring tc-translate's
+// SettingsModal), with the toggle relocated inside it as a role-card row.
 const SETTINGS_TABS = [
     { key: 'connection', label: 'AI接続' },
+    { key: 'network', label: 'AI Network' },
     { key: 'tasks', label: 'タスク' },
     { key: 'intro', label: 'はじめに' },
 ];
 
-// Old 4-tab layout ('providers'/'presets') was merged into a single
-// 'connection' tab, and the old 'network' tab's content was folded into
-// 'connection' as the "AI Network" mode of its 接続方式 toggle; this maps
-// any stale tab key (e.g. from a future persisted-tab feature, or a stale
-// reference held across these merges) onto its replacement so the panel
-// never lands on a tab that no longer exists.
-const LEGACY_TAB_FALLBACK = { providers: 'connection', presets: 'connection', network: 'connection' };
+// The old 4-tab layout's 'providers'/'presets' keys were merged into a single
+// 'connection' tab; this maps any stale tab key (e.g. from a future
+// persisted-tab feature, or a stale reference held across that merge) onto
+// its replacement so the panel never lands on a tab that no longer exists.
+// 'network' is intentionally absent now - it's a real tab again, so it maps
+// to itself.
+const LEGACY_TAB_FALLBACK = { providers: 'connection', presets: 'connection' };
 const normalizeTabKey = (key) => LEGACY_TAB_FALLBACK[key] || key;
 
+// Kept to one word each (see spec §3.2) - task rows carry their fuller
+// description in a hover tooltip (data-tip) instead of the label itself.
 const TASK_LABELS = {
-    explain: 'AI解説',
-    translate: 'AI翻訳',
+    explain: '説明',
+    translate: '翻訳',
     chat: 'チャット',
     ocr: 'OCR',
+};
+
+const TASK_TIPS = {
+    explain: 'ホバー/選択したテキストの解説に使うモデルです。',
+    translate: '用語やMarkdownの翻訳に使うモデルです。',
+    chat: 'AIチャットと要約に使うモデルです。',
+    ocr: 'ページ画像からのテキスト抽出（Vision）に使うモデルです。',
 };
 
 // getAvailableModels()は失敗を内部で握りつぶして空配列を返す実装のため、
@@ -57,8 +75,22 @@ function getHostLabel(baseUrl) {
     }
 }
 
-function NetworkProviderCard({ networkProviderEnabled, roomId, onToggle }) {
-    const provider = useNetworkProvider({ networkProviderEnabled, roomId });
+// networkProviderPresetIds is threaded through to useNetworkProvider so the
+// hello re-send effect advertises exactly the checked-to-share presets (spec
+// §2.3/§3.3/§4.3) - a provider with an empty share list advertises no models
+// at all rather than falling back to every model it happens to have.
+// eligiblePresets/onToggleShareModel/getProviderLabel back the share
+// checklist rendered here while ON (spec §3.3 共有モデルチェックリスト).
+function NetworkProviderCard({
+    networkProviderEnabled,
+    roomId,
+    networkProviderPresetIds,
+    eligiblePresets,
+    onToggleShareModel,
+    getProviderLabel,
+    onToggle,
+}) {
+    const provider = useNetworkProvider({ networkProviderEnabled, roomId, networkProviderPresetIds });
 
     return (
         <div className="settings-role-card">
@@ -75,6 +107,28 @@ function NetworkProviderCard({ networkProviderEnabled, roomId, onToggle }) {
             </label>
             {networkProviderEnabled && (
                 <div className="settings-role-body">
+                    <div className="network-share-models">
+                        <label>共有するモデル</label>
+                        {eligiblePresets.length === 0 ? (
+                            <p className="hint">共有できるモデルがありません。「AI接続」タブでモデルを追加してください。</p>
+                        ) : (
+                            <div className="network-share-list">
+                                {eligiblePresets.map((preset) => (
+                                    <label className="network-share-item" key={preset.id}>
+                                        <input
+                                            type="checkbox"
+                                            checked={networkProviderPresetIds.includes(preset.id)}
+                                            onChange={(event) => onToggleShareModel(preset.id, event.target.checked)}
+                                        />
+                                        <span className="network-share-item-label">{preset.label || preset.model}</span>
+                                        <span className="network-share-item-model">
+                                            {preset.model} · {getProviderLabel(preset.providerId)}
+                                        </span>
+                                    </label>
+                                ))}
+                            </div>
+                        )}
+                    </div>
                     <ProviderStatusPanel
                         status={provider.status}
                         statusUpdatedAt={provider.statusUpdatedAt}
@@ -271,11 +325,18 @@ export function SettingsPanel() {
     // キャッシュを信用しない）。force無しは未取得の時だけfetchする（行を
     // 開いた直後、既存presetの現在の接続先に対する初回表示はキャッシュを
     // 再利用してよい）。
+    // mist-network:// providers (see services/networkModels.js) have no HTTP
+    // model list to fetch - getAvailableModels already returns [] for them,
+    // but skipping the call here also avoids setting a misleading "取得
+    // できませんでした" error for a provider that was never supposed to have
+    // one (spec llm-settings-common-v1.md §3.1: no model fetch / connection
+    // test for these rows).
     const ensureProviderModelsFetched = (providerId, { force = false } = {}) => {
         if (!providerId) return;
         if (!force && modelsByProviderId[providerId] !== undefined) return;
         const provider = sharedConfig.providers.find((p) => p.id === providerId);
-        if (provider) fetchProviderModels(provider);
+        if (!provider || isNetworkProviderBaseUrl(provider.baseUrl)) return;
+        fetchProviderModels(provider);
     };
 
     // fetchProviderModels()がまだ動いている/未取得の間はselect表示のまま
@@ -337,7 +398,7 @@ export function SettingsPanel() {
                 return next;
             });
             const provider = nextConfig.providers.find((p) => p.id === id);
-            if (provider) fetchProviderModels(provider);
+            if (provider && !isNetworkProviderBaseUrl(provider.baseUrl)) fetchProviderModels(provider);
         }
     };
 
@@ -531,10 +592,39 @@ export function SettingsPanel() {
     const getExplicitTasksForPreset = (presetId) =>
         AI_TASKS.filter((task) => settings.taskPresetIds[task] === presetId);
 
+    // True when `providerId` resolves to the mist-network:// pseudo-provider
+    // (a model discovered via the AI Network room), as opposed to a regular
+    // HTTP connection the user configured directly (spec §2.2).
+    const isNetworkPresetProvider = (providerId) => {
+        const provider = sharedConfig.providers.find((p) => p.id === providerId);
+        return provider ? isNetworkProviderBaseUrl(provider.baseUrl) : false;
+    };
+
+    // Badges shown on a preset card: 既定 / explicit task assignments /
+    // Network由来 / 共有中 (spec §3.1).
+    const getPresetBadges = (preset) => {
+        const badges = [];
+        if (sharedConfig.defaultPresetId === preset.id) badges.push('既定');
+        getExplicitTasksForPreset(preset.id).forEach((task) => badges.push(TASK_LABELS[task]));
+        if (isNetworkPresetProvider(preset.providerId)) badges.push('Network由来');
+        if (settings.networkProviderPresetIds.includes(preset.id)) badges.push('共有中');
+        return badges;
+    };
+
     // --- Tasks -----------------------------------------------------------------
 
     const handleTaskPresetChange = (task, presetId) => {
         updateSettings({ ...settings, taskPresetIds: { ...settings.taskPresetIds, [task]: presetId } });
+    };
+
+    // setTaskReasoningEffort persists directly (it doesn't go through this
+    // component's updateSettings/saveAiSettings round-trip), so refresh local
+    // state and notify other listeners (e.g. the app-level network hooks)
+    // the same way updateSettings does for every other ai-settings write.
+    const handleTaskReasoningEffortChange = (task, effort) => {
+        setTaskReasoningEffort(task, effort);
+        setSettings(getAiSettings());
+        window.dispatchEvent(new CustomEvent('sync-data-updated'));
     };
 
     // --- Network -----------------------------------------------------------
@@ -544,6 +634,14 @@ export function SettingsPanel() {
         if (!enabled) {
             mistllm.disconnect();
         }
+    };
+
+    // Toggles a preset's membership in the set of presets advertised to the
+    // AI Network room (settings.networkProviderPresetIds), preserving order.
+    const handleToggleShareModel = (presetId, checked) => {
+        const current = settings.networkProviderPresetIds;
+        const next = checked ? [...current, presetId] : current.filter((id) => id !== presetId);
+        updateSettings({ ...settings, networkProviderPresetIds: next });
     };
 
     const handleRoomIdCommit = () => {
@@ -577,7 +675,12 @@ export function SettingsPanel() {
 
     const renderProviderRow = (provider) => {
         const isEditing = editingProviderId === provider.id;
+        const isNetworkProvider = isNetworkProviderBaseUrl(provider.baseUrl);
         const hostLabel = getHostLabel(provider.baseUrl);
+        // The raw `mist-network://<room>` URL is meaningless to a user - show
+        // a note instead (spec §3.1), same idea as the model-row-network
+        // accent applied below.
+        const secondLine = isNetworkProvider ? 'LLM Network ルーム' : hostLabel;
 
         if (isEditing) {
             // 決定ボタンは無し。各フィールドはblur確定のみで行は閉じない
@@ -626,10 +729,10 @@ export function SettingsPanel() {
         }
 
         return (
-            <div className="model-row" key={provider.id}>
+            <div className={`model-row${isNetworkProvider ? ' model-row-network' : ''}`} key={provider.id}>
                 <button type="button" className="model-row-main" onClick={() => handleOpenEditProvider(provider)}>
                     <span className="model-row-label">{provider.label || hostLabel}</span>
-                    <span className="model-row-model">{hostLabel}</span>
+                    <span className="model-row-model">{secondLine}</span>
                 </button>
                 <span
                     className="preset-chip-remove model-row-remove"
@@ -866,18 +969,19 @@ export function SettingsPanel() {
             );
         }
 
-        const taskKeys = getExplicitTasksForPreset(preset.id);
+        const badges = getPresetBadges(preset);
+        const isNetworkPreset = isNetworkPresetProvider(preset.providerId);
         return (
-            <div className="model-row" key={preset.id}>
+            <div className={`model-row${isNetworkPreset ? ' model-row-network' : ''}`} key={preset.id}>
                 <button type="button" className="model-row-main" onClick={() => handleOpenEditPreset(preset)}>
                     <span className="model-row-label">{preset.label}</span>
                     <span className="model-row-model">{preset.model}</span>
                     <span className="model-row-provider">{getProviderLabel(preset.providerId)}</span>
                 </button>
-                {taskKeys.length > 0 && (
+                {badges.length > 0 && (
                     <span className="model-row-badges">
-                        {taskKeys.map((task) => (
-                            <span key={task} className="task-badge">{TASK_LABELS[task]}</span>
+                        {badges.map((badge) => (
+                            <span key={badge} className="task-badge">{badge}</span>
                         ))}
                     </span>
                 )}
@@ -943,77 +1047,86 @@ export function SettingsPanel() {
         </>
     );
 
+    // AI接続タブはもう接続方式トグルを持たない — 直接APIのprovider/preset
+    // CRUDのみのフラットなセクション（mist-network://由来の行もここに並ぶ。
+    // 削除はできるが、fetchや接続テストの対象からは除外される — 前段の
+    // ensureProviderModelsFetched/handleUpdateProviderFieldのガード参照）。
     const renderConnectionTab = () => (
         <>
             <p className="hint">
                 接続（Base URL・APIキー）とプリセットは同一オリジンの他アプリ（tc-note、tc-translateなど）とも共有されます。一度設定すれば他アプリでも再利用できます。
             </p>
+            {renderDirectApiSection()}
+        </>
+    );
 
-            <div className="connection-mode-toggle" role="radiogroup" aria-label="接続方式">
-                <button
-                    type="button"
-                    role="radio"
-                    aria-checked={!isMistllm}
-                    className={`connection-mode-button ${!isMistllm ? 'connection-mode-button-active' : ''}`}
-                    onClick={() => handleConsumerToggle(false)}
-                >
-                    <Server size={14} />
-                    直接API接続
-                </button>
-                <button
-                    type="button"
-                    role="radio"
-                    aria-checked={isMistllm}
-                    className={`connection-mode-button ${isMistllm ? 'connection-mode-button-active' : ''}`}
-                    onClick={() => handleConsumerToggle(true)}
-                >
-                    <Network size={14} />
-                    AI Network
-                </button>
+    // Presets shareable to the AI Network room: must resolve to a real HTTP
+    // provider - a preset whose provider is itself the mist-network://
+    // pseudo-provider (i.e. imported from the room) can't be re-shared
+    // (spec §3.3/§4.2 - re-advertising it would loop traffic back into the
+    // room it came from).
+    const eligiblePresets = sharedConfig.presets.filter((preset) => !isNetworkPresetProvider(preset.providerId));
+
+    // AI Networkタブ: Room ID / 「ネットワークのLLMを使う」トグル（旧・接続
+    // 方式トグルをここへ移設）+ 接続状況 / 「providerとして参加」トグル + 共有
+    // モデルチェックリスト + 状態パネル（spec §3.3）。
+    const renderNetworkTab = () => (
+        <>
+            <p className="hint">
+                Mist LLMネットワーク（P2P）では、同じRoom IDに参加したデバイス同士でLLMを共有できます。Room IDは同一オリジンの他アプリとも共有されます。
+            </p>
+            <div className="form-group">
+                <label htmlFor="mistllm-room-id">Room ID</label>
+                <input
+                    id="mistllm-room-id"
+                    name="mistllm-room-id"
+                    value={roomIdInput}
+                    onInput={(event) => setRoomIdInput(event.target.value)}
+                    onBlur={handleRoomIdCommit}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.target.blur();
+                    }}
+                    placeholder="room-id"
+                    autoComplete="off"
+                />
             </div>
 
-            {isMistllm ? (
-                <>
-                    <p className="hint">
-                        Mist LLMネットワーク（P2P）では、同じRoom IDに参加したデバイス同士でLLMを共有できます。Room IDは同一オリジンの他アプリとも共有されます。
-                    </p>
-                    <div className="form-group">
-                        <label htmlFor="mistllm-room-id">Room ID</label>
+            <div className="settings-role-group">
+                <div className="settings-role-card">
+                    <label className="settings-role-head">
                         <input
-                            id="mistllm-room-id"
-                            name="mistllm-room-id"
-                            value={roomIdInput}
-                            onInput={(event) => setRoomIdInput(event.target.value)}
-                            onBlur={handleRoomIdCommit}
-                            onKeyDown={(event) => {
-                                if (event.key === 'Enter') event.target.blur();
-                            }}
-                            placeholder="room-id"
-                            autoComplete="off"
+                            type="checkbox"
+                            checked={isMistllm}
+                            onChange={(event) => handleConsumerToggle(event.target.checked)}
                         />
-                    </div>
-                    <div className="form-group">
-                        <label>接続状況</label>
-                        <ConsumerStatusIndicator
-                            status={consumerStatus}
-                            updatedAt={mistllm.updatedAt}
-                            variant="detailed"
-                            messages={MESSAGES_JA}
-                        />
-                    </div>
+                        <span className="settings-role-title">
+                            <strong>ネットワークのLLMを使う</strong>
+                            <span className="hint">オンにすると、この端末のAI機能はRoom内のプロバイダが提供するモデルを使うようになります。</span>
+                        </span>
+                    </label>
+                    {isMistllm && (
+                        <div className="settings-role-body">
+                            <ConsumerStatusIndicator
+                                status={consumerStatus}
+                                updatedAt={mistllm.updatedAt}
+                                variant="detailed"
+                                messages={MESSAGES_JA}
+                            />
+                            <p className="hint">Roomで見つかったモデルは自動的に「AI接続」タブのモデル一覧へ取り込まれます。</p>
+                        </div>
+                    )}
+                </div>
 
-                    <hr className="settings-section-divider" />
-
-                    <p className="hint">
-                        プロバイダ役は、この端末の直接API接続（チャットタスクのプリセット）を使って、同じRoomの他端末にAIを提供します。接続方式の選択とは独立して動作します。
-                    </p>
-                    <NetworkProviderCard
-                        networkProviderEnabled={settings.networkProviderEnabled}
-                        roomId={sharedConfig.network.roomId}
-                        onToggle={(enabled) => updateSettings({ ...settings, networkProviderEnabled: enabled })}
-                    />
-                </>
-            ) : renderDirectApiSection()}
+                <NetworkProviderCard
+                    networkProviderEnabled={settings.networkProviderEnabled}
+                    roomId={sharedConfig.network.roomId}
+                    networkProviderPresetIds={settings.networkProviderPresetIds}
+                    eligiblePresets={eligiblePresets}
+                    onToggleShareModel={handleToggleShareModel}
+                    getProviderLabel={getProviderLabel}
+                    onToggle={(enabled) => updateSettings({ ...settings, networkProviderEnabled: enabled })}
+                />
+            </div>
         </>
     );
 
@@ -1027,13 +1140,32 @@ export function SettingsPanel() {
         </div>
     );
 
+    // reasoning_effort select（5段階）: 各タスク行の2つ目のフィールド。値は
+    // getTaskReasoningEffort/setTaskReasoningEffort（services/ai.js）で読み書き。
+    const renderReasoningEffortSelect = (task) => (
+        <div className="task-model-field">
+            <select
+                value={getTaskReasoningEffort(task)}
+                onChange={(event) => handleTaskReasoningEffortChange(task, event.target.value)}
+                aria-label={`${TASK_LABELS[task]}のreasoning_effort`}
+                title="reasoning_effort"
+            >
+                {REASONING_EFFORT_OPTIONS.map((effort) => (
+                    <option key={effort} value={effort}>{effort}</option>
+                ))}
+            </select>
+        </div>
+    );
+
+    // タスクタブ: 常時表示のヒント段落は置かず、各行ラベルのhoverツールチップ
+    // （data-tip、CSS側はindex.cssの `.task-model-item > span[data-tip]`）に
+    // 説明を持たせる（spec §3.2/§4）。preset selectの選択肢は共有presets全部
+    // （Network由来カード含む — 選べばそのタスクの経路もnetworkになる）。
     const renderTasksTab = () => (
         <div className="form-group">
-            <label>タスク別モデル</label>
-            <p className="hint">未設定のタスクは、チャット用に選んだモデル、それも未設定なら既定のモデルを使います。未設定のままでも動作します。</p>
             {AI_TASKS.map((task) => (
                 <div key={task} className="task-model-item">
-                    <span>{TASK_LABELS[task]}</span>
+                    <span data-tip={TASK_TIPS[task]}>{TASK_LABELS[task]}</span>
                     <div className="task-model-fields">
                         <div className="task-model-field">
                             <select
@@ -1044,6 +1176,7 @@ export function SettingsPanel() {
                                 onChange={(event) => handleTaskPresetChange(task, event.target.value)}
                                 autoComplete="off"
                             >
+                                <option value="">既定と同じ</option>
                                 {sharedConfig.presets.map((preset) => (
                                     <option key={preset.id} value={preset.id}>
                                         {preset.label}（{getProviderLabel(preset.providerId)}）
@@ -1051,6 +1184,7 @@ export function SettingsPanel() {
                                 ))}
                             </select>
                         </div>
+                        {renderReasoningEffortSelect(task)}
                     </div>
                 </div>
             ))}
@@ -1076,6 +1210,7 @@ export function SettingsPanel() {
             <div className="settings-tab-panel" role="tabpanel">
                 {activeTab === 'intro' && renderIntroTab()}
                 {activeTab === 'connection' && renderConnectionTab()}
+                {activeTab === 'network' && renderNetworkTab()}
                 {activeTab === 'tasks' && renderTasksTab()}
             </div>
         </div>

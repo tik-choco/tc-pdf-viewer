@@ -41,7 +41,7 @@ export function useMistllm() {
 
     useEffect(() => {
         return () => {
-            // The consumer is a shared singleton (ai.js chatAiViaMistllm and the
+            // The consumer is a shared singleton (ai.js chatAiViaMistllmRoom and the
             // eager useNetworkConsumerConnection hook use it too), so do NOT
             // disconnect on unmount — just stop reacting to it. Disconnecting
             // happens only via explicit user action or the eager-connect hook.

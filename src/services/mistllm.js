@@ -33,8 +33,12 @@
 // then by advertised model; a single failover retry is attempted via
 // `isFailoverEligible` before the first response chunk arrives.
 //
-// Public API is unchanged: encode, decode, MistllmConsumer/getMistllmConsumer,
-// MistllmProvider/getMistllmProvider — hooks and ai.js need no changes.
+// Public API: encode, decode, MistllmConsumer/getMistllmConsumer,
+// MistllmProvider/getMistllmProvider. MistllmProvider additionally exposes
+// updateModels(models) (llm-settings-common-v1.md §4.3 "hello re-send"): call
+// it whenever the advertised model set changes while already connected to
+// re-broadcast provider_hello in place, without leaving/rejoining the room -
+// see hooks/useNetworkProvider.js for the reactive wiring that calls it.
 
 import {
     ConsumerService,
@@ -112,7 +116,7 @@ let _roomNode = null;
 let _roomId = null;
 // Serializes acquireRoom() calls so two concurrent callers (e.g. the
 // debounced eager-connect hook racing an explicit connect() from
-// chatAiViaMistllm) can't both observe the pre-join state across the
+// chatAiViaMistllmRoom) can't both observe the pre-join state across the
 // `await getMistNode()` boundary and double-claim/corrupt the refcount.
 let _joinQueue = Promise.resolve();
 
@@ -760,6 +764,31 @@ export class MistllmProvider {
             }
             throw err;
         }
+    }
+
+    /**
+     * Updates the advertised model list in place and, if currently connected,
+     * re-broadcasts provider_hello to every peer in the room - WITHOUT
+     * leaving/rejoining - so already-connected consumers pick up a changed
+     * share list immediately (spec llm-settings-common-v1.md §4.3: mistai's
+     * consumer applies an in-connection provider_hello to its provider table
+     * and status.models right away, so this alone closes the propagation
+     * loop; no in-flight request is disrupted). No-op if the (sorted, deduped
+     * by the caller - see getAdvertisedNetworkModels in ../services/ai.js)
+     * model set is unchanged, or if not currently connected (start()'s own
+     * initial hello covers that case once a connection is established).
+     *
+     * @param {string[]} models
+     */
+    updateModels(models) {
+        const next = Array.isArray(models) ? models.filter((m) => typeof m === 'string' && m.length > 0) : [];
+        const nextKey = [...next].sort().join('\n');
+        const currentKey = [...this.models].sort().join('\n');
+        if (nextKey === currentKey) return;
+
+        this.models = next;
+        if (this.status !== 'connected' || !this.node) return;
+        this.node.sendMessage('', encode(this._helloMessage()), DELIVERY_RELIABLE);
     }
 
     _handleMessage(node, fromId, msg) {
