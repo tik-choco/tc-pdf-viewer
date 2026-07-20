@@ -33,6 +33,23 @@ function clonePdfData(pdfBuffer) {
   return pdfBuffer;
 }
 
+export async function getPdfPageCount(pdfBuffer, { signal } = {}) {
+  throwIfAborted(signal);
+  const loadingTask = pdfjs.getDocument(getPdfDocumentParams(pdfBuffer));
+  const abortLoading = () => loadingTask.destroy();
+  signal?.addEventListener('abort', abortLoading, { once: true });
+  let pdf;
+  try {
+    pdf = await loadingTask.promise;
+  } catch (err) {
+    throwIfAborted(signal);
+    throw err;
+  } finally {
+    signal?.removeEventListener('abort', abortLoading);
+  }
+  return pdf.numPages;
+}
+
 export async function renderPdfPagesToImages(
   pdfBuffer,
   {
@@ -42,6 +59,7 @@ export async function renderPdfPagesToImages(
     quality = 0.88,
     onProgress,
     signal,
+    pageNumbers,
   } = {}
 ) {
   throwIfAborted(signal);
@@ -57,12 +75,15 @@ export async function renderPdfPagesToImages(
   } finally {
     signal?.removeEventListener('abort', abortLoading);
   }
-  const pageCount = Math.min(pdf.numPages, maxPages);
+  const targetPageNumbers = Array.isArray(pageNumbers) && pageNumbers.length
+    ? pageNumbers
+    : Array.from({ length: Math.min(pdf.numPages, maxPages) }, (_, i) => i + 1);
   const images = [];
 
-  for (let i = 1; i <= pageCount; i++) {
+  for (let idx = 0; idx < targetPageNumbers.length; idx++) {
     throwIfAborted(signal);
-    const page = await pdf.getPage(i);
+    const pageNumber = targetPageNumbers[idx];
+    const page = await pdf.getPage(pageNumber);
     throwIfAborted(signal);
     const viewport = page.getViewport({ scale });
     const canvas = document.createElement('canvas');
@@ -91,11 +112,11 @@ export async function renderPdfPagesToImages(
     throwIfAborted(signal);
 
     images.push({
-      pageNumber: i,
+      pageNumber,
       dataUrl: canvas.toDataURL(mimeType, quality),
     });
 
-    onProgress?.({ done: i, total: pageCount });
+    onProgress?.({ done: idx + 1, total: targetPageNumbers.length });
   }
 
   return images;
