@@ -3,6 +3,7 @@ import { getMistNode } from '../utils/mist.js';
 import { readDeviceId } from '../utils/device.js';
 import { publishShared } from './sharedBus.js';
 import { scheduleDriveExport } from './driveExport.js';
+import { sha256Hex } from './driveCrypto.js';
 
 export async function initMist() {
     return await getMistNode();
@@ -118,6 +119,8 @@ export async function renamePdf(oldName, newName) {
             await saveTranslatedMarkdownIndex(translatedIndex);
         }
 
+        renameJobCheckpointsForPdf(oldName, newName);
+
         scheduleDriveExport();
         return true;
     }
@@ -142,6 +145,7 @@ export async function deletePdf(name) {
     }
 
     await clearChatMessages(name);
+    clearJobCheckpointsForPdf(name);
 
     scheduleDriveExport();
 }
@@ -504,4 +508,140 @@ export async function clearChatMessages(pdfName) {
     } catch (error) {
         console.warn(`failed to remove legacy chat key for "${pdfName}"`, error);
     }
+}
+
+// --- Resumable OCR/翻訳 job checkpoints ------------------------------------
+//
+// OCR and translation jobs persist per-unit (page/chunk) output as it
+// completes, so a refresh or crash mid-job can resume from the last
+// completed unit instead of restarting from scratch. Like the indexes
+// above, only small CID pointers live in localStorage; unit bodies are
+// content-addressed via mistlib storage_add/storage_get.
+const JOB_CHECKPOINT_INDEX_KEY = 'tc-pdf-viewer-job-checkpoints-v1';
+
+export function ocrCheckpointKey(pdfName) {
+    return `ocr:${pdfName}`;
+}
+
+export function translationCheckpointKey(pdfName, language) {
+    return `translation:${pdfName}:${language}`;
+}
+
+function getJobCheckpointIndex() {
+    try {
+        const parsed = JSON.parse(localStorage.getItem(JOB_CHECKPOINT_INDEX_KEY) || '{}');
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+        console.warn('failed to parse tc-pdf-viewer-job-checkpoints-v1', error);
+        return {};
+    }
+}
+
+function saveJobCheckpointIndex(index) {
+    try {
+        localStorage.setItem(JOB_CHECKPOINT_INDEX_KEY, JSON.stringify(index));
+    } catch (error) {
+        console.warn('failed to persist tc-pdf-viewer-job-checkpoints-v1', error);
+    }
+}
+
+export function getJobCheckpoint(key) {
+    const index = getJobCheckpointIndex();
+    return index[key] || null;
+}
+
+export async function saveJobCheckpointUnit(key, meta, index, text) {
+    try {
+        await initMist();
+        const cid = await storage_add(`ckpt:${key}:u${index}`, new TextEncoder().encode(text));
+
+        const checkpointIndex = getJobCheckpointIndex();
+        let entry = checkpointIndex[key];
+        if (!entry || entry.sig !== meta.sig || entry.total !== meta.total) {
+            entry = { pdfName: meta.pdfName, sig: meta.sig, total: meta.total, units: {}, updatedAt: Date.now() };
+        }
+        entry.units[index] = { cid, updatedAt: Date.now() };
+        entry.updatedAt = Date.now();
+        checkpointIndex[key] = entry;
+        saveJobCheckpointIndex(checkpointIndex);
+    } catch (error) {
+        console.warn(`failed to save job checkpoint unit for "${key}" #${index}`, error);
+    }
+}
+
+export async function loadJobCheckpointUnits(key, meta) {
+    try {
+        const entry = getJobCheckpointIndex()[key];
+        if (!entry || entry.sig !== meta.sig || entry.total !== meta.total) return {};
+
+        await initMist();
+        const units = {};
+        for (const [unitIndex, unit] of Object.entries(entry.units || {})) {
+            try {
+                const data = await storage_get(unit.cid);
+                units[unitIndex] = new TextDecoder().decode(data);
+            } catch (error) {
+                console.warn(`failed to load job checkpoint unit for "${key}" #${unitIndex}`, error);
+            }
+        }
+        return units;
+    } catch (error) {
+        console.warn(`failed to load job checkpoint units for "${key}"`, error);
+        return {};
+    }
+}
+
+export function clearJobCheckpoint(key) {
+    const index = getJobCheckpointIndex();
+    if (index[key]) {
+        delete index[key];
+        saveJobCheckpointIndex(index);
+    }
+}
+
+export function clearJobCheckpointsForPdf(pdfName) {
+    const index = getJobCheckpointIndex();
+    let changed = false;
+    for (const key of Object.keys(index)) {
+        if (index[key]?.pdfName === pdfName) {
+            delete index[key];
+            changed = true;
+        }
+    }
+    if (changed) saveJobCheckpointIndex(index);
+}
+
+export function renameJobCheckpointsForPdf(oldName, newName) {
+    const index = getJobCheckpointIndex();
+    let changed = false;
+    for (const key of Object.keys(index)) {
+        const entry = index[key];
+        if (entry?.pdfName !== oldName) continue;
+
+        let newKey = null;
+        if (key === ocrCheckpointKey(oldName)) {
+            newKey = ocrCheckpointKey(newName);
+        } else {
+            const prefix = `translation:${oldName}:`;
+            if (key.startsWith(prefix)) {
+                newKey = translationCheckpointKey(newName, key.slice(prefix.length));
+            }
+        }
+        if (!newKey) continue;
+
+        entry.pdfName = newName;
+        delete index[key];
+        index[newKey] = entry;
+        changed = true;
+    }
+    if (changed) saveJobCheckpointIndex(index);
+}
+
+export async function computeTextSig(text) {
+    return sha256Hex(new TextEncoder().encode(text));
+}
+
+export function getPdfFileCid(name) {
+    const file = getFilesIndex().find(f => f.name === name);
+    return file?.cid || null;
 }

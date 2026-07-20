@@ -4,10 +4,10 @@ import PdfViewer from './components/PdfViewer';
 import MarkdownViewer from './components/MarkdownViewer';
 import Tooltip from './components/Tooltip';
 import Chat from './components/Chat';
-import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, saveOcrMarkdownSummary, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveOcrMarkdownIndex, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot, saveTranslatedMarkdownIndex, migrateMarkdownIndexesToCid, getExplanationsIndex } from './services/storage';
+import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, saveOcrMarkdownSummary, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveOcrMarkdownIndex, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot, saveTranslatedMarkdownIndex, migrateMarkdownIndexesToCid, getExplanationsIndex, ocrCheckpointKey, translationCheckpointKey, saveJobCheckpointUnit, loadJobCheckpointUnits, clearJobCheckpoint, computeTextSig, getPdfFileCid } from './services/storage';
 import { scheduleDriveExport } from './services/driveExport';
-import { extractText, renderPdfPagesToImages } from './services/pdf';
-import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown, summarizeOcrMarkdown, getNetworkRoomId } from './services/ai';
+import { extractText, renderPdfPagesToImages, getPdfPageCount } from './services/pdf';
+import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown, summarizeOcrMarkdown, getNetworkRoomId, splitMarkdownForTranslation } from './services/ai';
 import { PanelLeftClose, PanelLeftOpen, MessageCircle, RefreshCw, FileText, X } from 'lucide-preact';
 import { useSync } from './hooks/useSync';
 import { useNetworkConsumerConnection } from './hooks/useNetworkConsumerConnection';
@@ -441,59 +441,120 @@ export function App() {
 
     const data = await loadPdf(job.pdfName);
     throwIfCancelled(signal);
-    const images = await renderPdfPagesToImages(data, {
-      scale: 2,
-      signal,
-      onProgress: ({ done, total }) => {
-        markAiJob(job.id, {
-          progress: `Rendering PDF pages... ${done}/${total}`,
-          done,
-          total,
-        });
-        if (currentPdfNameRef.current === job.pdfName) {
-          setOcrStatus(`Rendering PDF pages... ${done}/${total}`);
-        }
-      },
-    });
 
-    const pageMarkdown = [];
-    for (let i = 0; i < images.length; i += 1) {
-      throwIfCancelled(signal);
-      const progress = `Running LLM OCR... ${i + 1}/${images.length}`;
+    const pageCount = await getPdfPageCount(data, { signal });
+    throwIfCancelled(signal);
+
+    const sig = `${getPdfFileCid(job.pdfName) || 'na'}:${pageCount}`;
+    const key = ocrCheckpointKey(job.pdfName);
+    const restored = await loadJobCheckpointUnits(key, { sig, total: pageCount });
+
+    const pageMarkdown = new Array(pageCount);
+    const pendingPageNumbers = [];
+    let done = 0;
+    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
+      const text = restored[pageIndex];
+      if (typeof text === 'string' && text) {
+        pageMarkdown[pageIndex] = text;
+        done += 1;
+      } else {
+        pendingPageNumbers.push(pageIndex + 1);
+      }
+    }
+    const restoredCount = done;
+    const joinPageMarkdown = () => pageMarkdown.filter(text => typeof text === 'string' && text).join('\n\n');
+
+    if (restoredCount > 0) {
+      const progress = `Running LLM OCR... ${done}/${pageCount} (resumed ${restoredCount})`;
       markAiJob(job.id, {
         progress,
-        done: i,
-        total: images.length,
+        done,
+        total: pageCount,
+      });
+      if (currentPdfNameRef.current === job.pdfName) {
+        setOcrMarkdown(joinPageMarkdown());
+        setHasSavedOcrMarkdown(false);
+        setOcrStatus(progress);
+      }
+    }
+
+    let images = [];
+    if (pendingPageNumbers.length) {
+      images = await renderPdfPagesToImages(data, {
+        scale: 2,
+        signal,
+        pageNumbers: pendingPageNumbers,
+        onProgress: ({ done: renderDone, total: renderTotal }) => {
+          markAiJob(job.id, {
+            progress: `Rendering PDF pages... ${renderDone}/${renderTotal}`,
+            done: renderDone,
+            total: renderTotal,
+          });
+          if (currentPdfNameRef.current === job.pdfName) {
+            setOcrStatus(`Rendering PDF pages... ${renderDone}/${renderTotal}`);
+          }
+        },
+      });
+    }
+
+    const failures = [];
+    for (let idx = 0; idx < images.length; idx += 1) {
+      throwIfCancelled(signal);
+      const pageNumber = pendingPageNumbers[idx];
+      const pageIndex = pageNumber - 1;
+      const progress = `Running LLM OCR... ${done}/${pageCount}`;
+      markAiJob(job.id, {
+        progress,
+        done,
+        total: pageCount,
       });
       if (currentPdfNameRef.current === job.pdfName) {
         setOcrStatus(progress);
       }
 
-      const markdown = await ocrImagesToMarkdown([images[i]], { fileName: job.pdfName, signal });
+      let markdown;
+      try {
+        markdown = await ocrImagesToMarkdown([images[idx]], { fileName: job.pdfName, signal });
+      } catch (err) {
+        throwIfCancelled(signal);
+        if (err?.name === 'AbortError') throw err;
+        failures.push({ pageNumber, error: err });
+        continue;
+      }
       throwIfCancelled(signal);
-      pageMarkdown.push(markdown);
-      const partialMarkdown = pageMarkdown.join('\n\n');
 
+      pageMarkdown[pageIndex] = markdown;
+      done += 1;
+      await saveJobCheckpointUnit(key, { pdfName: job.pdfName, sig, total: pageCount }, pageIndex, markdown);
+
+      const progressAfter = `Running LLM OCR... ${done}/${pageCount}`;
       markAiJob(job.id, {
-        progress: `Running LLM OCR... ${i + 1}/${images.length}`,
-        done: i + 1,
-        total: images.length,
+        progress: progressAfter,
+        done,
+        total: pageCount,
       });
       if (currentPdfNameRef.current === job.pdfName) {
-        setOcrMarkdown(partialMarkdown);
+        setOcrMarkdown(joinPageMarkdown());
         setHasSavedOcrMarkdown(false);
+        setOcrStatus(progressAfter);
       }
+    }
+
+    if (failures.length) {
+      const firstErrorMessage = failures[0].error?.message || String(failures[0].error);
+      throw new Error(`${failures.length}/${pageCount} ページのOCRに失敗しました。OCRを再実行すると続きから再開できます。（${firstErrorMessage}）`);
     }
 
     const finalMarkdown = pageMarkdown.join('\n\n');
     await saveOcrMarkdown(job.pdfName, finalMarkdown);
     setOcrMarkdownIndex(getOcrMarkdownIndexSnapshot());
     window.dispatchEvent(new CustomEvent('sync-data-updated'));
+    clearJobCheckpoint(key);
 
     markAiJob(job.id, {
       progress: 'Generating summary...',
-      done: images.length,
-      total: images.length,
+      done: pageCount,
+      total: pageCount,
     });
     if (currentPdfNameRef.current === job.pdfName) {
       setOcrStatus('Generating summary...');
@@ -514,8 +575,8 @@ export function App() {
     markAiJob(job.id, {
       status: 'complete',
       progress: 'OCR saved',
-      done: images.length,
-      total: images.length,
+      done: pageCount,
+      total: pageCount,
     });
   }, [generateAndSaveOcrSummary, markAiJob]);
 
@@ -526,6 +587,11 @@ export function App() {
       done: 0,
       total: null,
     });
+
+    const sig = await computeTextSig(job.markdown);
+    const chunkTotal = splitMarkdownForTranslation(job.markdown).length;
+    const key = translationCheckpointKey(job.pdfName, language);
+    const initialChunks = await loadJobCheckpointUnits(key, { sig, total: chunkTotal });
 
     const translated = await translateMarkdown(job.markdown, language, ({ done, total, translatedMarkdown }) => {
       const progress = `Translating to ${language}... ${done}/${total}`;
@@ -538,12 +604,19 @@ export function App() {
         setTranslatedMarkdown(translatedMarkdown);
         setMarkdownTranslateStatus(progress);
       }
-    }, { signal });
+    }, {
+      signal,
+      initialChunks,
+      onChunkComplete: async (index, text, chunkCount) => {
+        await saveJobCheckpointUnit(key, { pdfName: job.pdfName, sig, total: chunkCount }, index, text);
+      },
+    });
     throwIfCancelled(signal);
 
     await saveTranslatedMarkdown(job.pdfName, language, translated);
     setTranslatedMarkdownIndex(getTranslatedMarkdownIndexSnapshot());
     window.dispatchEvent(new CustomEvent('sync-data-updated'));
+    clearJobCheckpoint(key);
 
     if (currentPdfNameRef.current === job.pdfName && lastLangRef.current === language) {
       setTranslatedMarkdown(translated);

@@ -725,14 +725,30 @@ function throwIfAborted(signal) {
 }
 
 export async function translateMarkdown(markdown, targetLanguage = '日本語', onProgress = null, options = {}) {
-    const { signal = null } = options;
+    const { signal = null, initialChunks = null, onChunkComplete = null } = options;
     throwIfAborted(signal);
     const chunks = splitMarkdownForTranslation(markdown);
     const translatedChunks = Array(chunks.length).fill('');
     const completedChunks = Array(chunks.length).fill(false);
     let completed = 0;
     let nextIndex = 0;
-    let failed = false;
+    const failures = [];
+
+    // Prefill from a previous (interrupted) run's checkpoint: mark those
+    // indices completed up front so the worker pool below skips them
+    // entirely (never calls the LLM for them) and progress/done counts
+    // include them from the very first notifyProgress().
+    if (initialChunks) {
+        for (const key of Object.keys(initialChunks)) {
+            const index = Number(key);
+            const value = initialChunks[key];
+            if (!Number.isInteger(index) || index < 0 || index >= chunks.length) continue;
+            if (typeof value !== 'string' || !value) continue;
+            translatedChunks[index] = value;
+            completedChunks[index] = true;
+            completed += 1;
+        }
+    }
 
     const notifyProgress = () => {
         const visibleChunks = [];
@@ -750,10 +766,11 @@ export async function translateMarkdown(markdown, targetLanguage = '日本語', 
     };
 
     const translateNextChunk = async () => {
-        while (!failed && nextIndex < chunks.length) {
+        while (nextIndex < chunks.length) {
             throwIfAborted(signal);
             const index = nextIndex;
             nextIndex += 1;
+            if (completedChunks[index]) continue; // prefilled from initialChunks - skip the LLM call
 
             try {
                 const translated = await translateMarkdownChunkWithRetry(chunks[index], targetLanguage, {
@@ -768,10 +785,18 @@ export async function translateMarkdown(markdown, targetLanguage = '日本語', 
                 translatedChunks[index] = translated.trim();
                 completedChunks[index] = true;
                 completed += 1;
+                if (onChunkComplete) {
+                    try {
+                        await onChunkComplete(index, translatedChunks[index], chunks.length);
+                    } catch (callbackErr) {
+                        console.warn('onChunkComplete failed:', callbackErr);
+                    }
+                }
                 notifyProgress();
             } catch (err) {
-                failed = true;
-                throw err;
+                throwIfAborted(signal);
+                if (err?.name === 'AbortError') throw err;
+                failures.push({ index, error: err });
             }
         }
     };
@@ -780,6 +805,12 @@ export async function translateMarkdown(markdown, targetLanguage = '日本語', 
     throwIfAborted(signal);
     const workerCount = Math.min(MARKDOWN_TRANSLATION_CONCURRENCY, chunks.length);
     await Promise.all(Array.from({ length: workerCount }, () => translateNextChunk()));
+
+    if (failures.length) {
+        failures.sort((a, b) => a.index - b.index);
+        const firstMessage = failures[0].error?.message || String(failures[0].error);
+        throw new Error(`${failures.length}/${chunks.length} チャンクの翻訳に失敗しました。翻訳を再実行すると続きから再開できます。（${firstMessage}）`);
+    }
 
     return translatedChunks.map(chunk => chunk.trim()).join('\n\n');
 }
@@ -849,7 +880,7 @@ function buildTranslationMessages(prompt, targetLanguage) {
     ];
 }
 
-function splitMarkdownForTranslation(markdown, maxChars = MARKDOWN_TRANSLATION_CHUNK_SIZE) {
+export function splitMarkdownForTranslation(markdown, maxChars = MARKDOWN_TRANSLATION_CHUNK_SIZE) {
     if (!markdown || markdown.length <= maxChars) return [markdown || ''];
 
     const chunks = [];
@@ -1066,7 +1097,7 @@ export async function ocrImagesToMarkdown(images, { fileName = 'document.pdf', s
         ]))
     ];
 
-    return await chatAi([{ role: 'user', content }], 'ocr', { signal });
+    return await chatAi([{ role: 'user', content }], 'ocr', { signal, timeoutMs: 120000 });
 }
 
 // Fetches the model list for a given (baseUrl, apiKey) connection, used by
