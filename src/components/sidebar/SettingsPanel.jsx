@@ -1157,10 +1157,26 @@ export function SettingsPanel() {
         </div>
     );
 
+    // taskPresetIds[task]が指すpresetがmist-network://由来かどうか（select横の
+    // Networkバッジ表示に使う）。isNetworkPresetProviderと同じ判定をpresetId
+    // 経由で行う。
+    const isNetworkPreset = (presetId) => {
+        const preset = sharedConfig.presets.find((p) => p.id === presetId);
+        return preset ? isNetworkPresetProvider(preset.providerId) : false;
+    };
+
+    // AI Networkのconsumer接続が実際に繋がっているか（spec §3.2 のフィルタ
+    // 条件、tc-translateのSettingsModal.tsx `networkConnected` と同じ判定）。
+    // 未接続時はNetwork由来presetをタスクselectの選択肢から外す — 選べても
+    // その場では解決できないカードを見せない。
+    const networkConnected = consumerStatus.phase === 'connected';
+
     // タスクタブ: 常時表示のヒント段落は置かず、各行ラベルのhoverツールチップ
     // （data-tip、CSS側はindex.cssの `.task-model-item > span[data-tip]`）に
     // 説明を持たせる（spec §3.2/§4）。preset selectの選択肢は共有presets全部
-    // （Network由来カード含む — 選べばそのタスクの経路もnetworkになる）。
+    // （Network由来カード含む — 選べばそのタスクの経路もnetworkになる。ただし
+    // 未接続時はNetwork由来を除外し、選択肢にはoption-networkクラス、選択中
+    // ならselect横にNetworkバッジを添えて一目で区別できるようにする）。
     const renderTasksTab = () => (
         <div className="form-group">
             {AI_TASKS.map((task) => (
@@ -1168,21 +1184,32 @@ export function SettingsPanel() {
                     <span data-tip={TASK_TIPS[task]}>{TASK_LABELS[task]}</span>
                     <div className="task-model-fields">
                         <div className="task-model-field">
-                            <select
-                                id={`select-preset-${task}`}
-                                name={`select-preset-${task}`}
-                                aria-label={`${TASK_LABELS[task]}のモデル`}
-                                value={settings.taskPresetIds[task] || ''}
-                                onChange={(event) => handleTaskPresetChange(task, event.target.value)}
-                                autoComplete="off"
-                            >
-                                <option value="">既定と同じ</option>
-                                {sharedConfig.presets.map((preset) => (
-                                    <option key={preset.id} value={preset.id}>
-                                        {preset.label}（{getProviderLabel(preset.providerId)}）
-                                    </option>
-                                ))}
-                            </select>
+                            <div className="task-model-select-row">
+                                <select
+                                    id={`select-preset-${task}`}
+                                    name={`select-preset-${task}`}
+                                    aria-label={`${TASK_LABELS[task]}のモデル`}
+                                    value={settings.taskPresetIds[task] || ''}
+                                    onChange={(event) => handleTaskPresetChange(task, event.target.value)}
+                                    autoComplete="off"
+                                >
+                                    <option value="">既定と同じ</option>
+                                    {sharedConfig.presets
+                                        .filter((preset) => networkConnected || !isNetworkPresetProvider(preset.providerId))
+                                        .map((preset) => (
+                                            <option
+                                                key={preset.id}
+                                                value={preset.id}
+                                                className={isNetworkPresetProvider(preset.providerId) ? 'option-network' : undefined}
+                                            >
+                                                {preset.label}（{getProviderLabel(preset.providerId)}）
+                                            </option>
+                                        ))}
+                                </select>
+                                {networkConnected && isNetworkPreset(settings.taskPresetIds[task]) && (
+                                    <span className="task-badge task-badge-network">Network由来</span>
+                                )}
+                            </div>
                         </div>
                         {renderReasoningEffortSelect(task)}
                     </div>
