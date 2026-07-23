@@ -925,6 +925,34 @@ button:not(:disabled):active {
   min-width: 0;
 }
 
+/* select本体とその横に添えるNetworkバッジ(あれば)を1行に並べる。バッジが
+   無い行はselectだけがそのまま100%幅で並ぶので、既存レイアウトへの影響はない。 */
+.task-model-select-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.task-model-select-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* select内、AI Networkルーム由来のoptionをテキスト色で区別する。ネイティブ
+   optionはbackground/borderなど装飾がほぼ効かないブラウザが多いため、
+   colorのみ .model-row-network / task-badge と同じprimaryトーンで当てる。 */
+option.option-network {
+  color: var(--primary);
+}
+
+/* AI Networkルーム提供のプリセットが選ばれているタスクselectに添える印。
+   .task-badgeと同じprimaryトーンで統一し、AI接続タブのNetworkバッジと
+   見た目を揃える。 */
+.task-model-select-row .task-badge-network {
+  flex-shrink: 0;
+}
+
 .save-btn {
   width: 100%;
   background: var(--primary);
