@@ -356,7 +356,16 @@ export function SettingsPanel() {
         const config = getSharedLlmConfig();
         const stillValid = config.presets.some((p) => p.id === config.defaultPresetId);
         if (!stillValid) {
-            setDefaultLlmPresetId(config.presets[0]?.id || '');
+            // 先頭presetへの無条件付け替えは、共有config上の先頭行がたまたま
+            // 他アプリ由来の mist-network:// ミラーpresetだった場合に共有
+            // defaultPresetIdをAI Network経由へ化けさせてしまう。providerの
+            // baseUrlがmist-network://で始まらない最初のpresetに限定し、
+            // 無ければ空(未設定)に留める。
+            const nonNetworkPreset = config.presets.find((p) => {
+                const provider = config.providers.find((pr) => pr.id === p.providerId);
+                return provider !== undefined && !isNetworkProviderBaseUrl(provider.baseUrl);
+            });
+            setDefaultLlmPresetId(nonNetworkPreset?.id || '');
         }
         refreshSharedConfig();
     };
