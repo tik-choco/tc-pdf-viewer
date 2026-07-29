@@ -28,7 +28,7 @@
  */
 export const BUS_VERSION = 1;
 
-/** @typedef {"tc-note"|"tc-storage"|"tc-pdf-viewer"|"tc-translate"|"tc-chat"|"tc-news"|"tc-town"|"tc-travel"|"tc-vrm-viewer"|"tc-books"|"tc-lingo"} SharedAppName */
+/** @typedef {"tc-note"|"tc-storage"|"tc-pdf-viewer"|"tc-translate"|"tc-chat"|"tc-news"|"tc-town"|"tc-travel"|"tc-vrm-viewer"|"tc-books"|"tc-lingo"|"tc-presenter"} SharedAppName */
 
 /** This vendored copy's app name, used as `SharedRecord.from`/`SharedBusMessage.from`.
  * Substituted per app by protocol/scripts/sync-vendored.mjs — do not edit by hand.
