@@ -1,5 +1,6 @@
 import { MistNode } from '../lib/mistlib/index.js';
 import { readDeviceId } from './device.js';
+import { mistSignalingConfig } from '../services/mistSignaling.js';
 
 // Presence event types emitted by mistlib's onEvent callback. Not exported as
 // named constants by the mistlib build in this repo, so mirrored here as
@@ -43,14 +44,14 @@ export function getOrCreateMistllmNodeId() {
 }
 
 const deviceId = readDeviceId();
-const sysNode = new MistNode(deviceId);
+const sysNode = new MistNode(deviceId, mistSignalingConfig());
 let _initPromise = null;
 let _dispatcherInstalled = false;
 const _eventListeners = new Set();
 
 export async function getMistNode() {
   if (!_initPromise) {
-    _initPromise = sysNode.initWithConfig();
+    _initPromise = sysNode.init();
   }
   await _initPromise;
   if (!_dispatcherInstalled) {

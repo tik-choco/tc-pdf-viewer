@@ -24,3 +24,9 @@ dist-ssr
 *.sw?
 .claude
 .omc/
+
+# mistlib's JS-wrapper git clone cache used by scripts/fetch-mistlib.mjs; the
+# vendored output it produces (src/lib/mistlib) IS committed.
+.mistlib-examples-src
+
+.env
