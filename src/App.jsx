@@ -13,6 +13,7 @@ import { useSync } from './hooks/useSync';
 import { useNetworkConsumerConnection } from './hooks/useNetworkConsumerConnection';
 import { useNetworkProvider } from './hooks/useNetworkProvider';
 import { useNetworkModelSync } from './hooks/useNetworkModelSync';
+import { useTts } from './hooks/useTts';
 import { SyncPanel } from './components/SyncPanel';
 import { DiffConfirmPanel } from './components/DiffConfirmPanel';
 import { QRPanel } from './components/QRPanel';
@@ -236,6 +237,11 @@ export function App() {
     backend: currentAiSettings.backend,
     roomId: networkRoomId,
   });
+
+  // Selection read-aloud (Tooltip の読み上げボタン). The engine — browser
+  // voice / TTS API / AI Network — is derived from the shared llm config,
+  // so nothing about it is passed in here; see services/tts.js.
+  const tts = useTts();
 
   const [isSyncOpen, setIsSyncOpen] = useState(false);
   const [isQrOpen, setIsQrOpen] = useState(false);
@@ -964,11 +970,13 @@ export function App() {
   }, []);
 
   const handleHoverText = useCallback((text, pos) => {
+    // A new selection supersedes whatever was being read out.
+    tts.stop();
     setTooltipPos(pos);
     setTooltipText(null);
     setLastHoverText(text);
     setIsTooltipVisible(true);
-  }, []);
+  }, [tts.stop]);
 
   const handleRequestExplanation = async () => {
     if (!lastHoverText) return;
@@ -1101,6 +1109,7 @@ export function App() {
   };
 
   const closeTooltip = () => {
+    tts.stop();
     setIsTooltipVisible(false);
   };
 
@@ -1307,6 +1316,11 @@ export function App() {
           onRequestTranslation={handleRequestTranslation}
           onSwitchLanguage={handleSwitchLanguage}
           lastLang={lastLang}
+          onSpeak={tts.speak}
+          ttsSupported={tts.supported}
+          speakingId={tts.speakingId}
+          ttsLoadingId={tts.loadingId}
+          ttsError={tts.error}
         />
       </main>
 

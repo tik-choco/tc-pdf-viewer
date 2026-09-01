@@ -29,9 +29,12 @@
 // ConsumerClient: every announced provider is kept in a table (keyed by peer
 // id, updated on each provider_hello, dropped on disconnect) instead of
 // latching onto the first one forever; `selectProvider` narrows by
-// provider_hello.services (this app only ever advertises/consumes "chat") and
-// then by advertised model; a single failover retry is attempted via
-// `isFailoverEligible` before the first response chunk arrives.
+// provider_hello.services (this app's provider role only ever advertises
+// "chat", but the consumer role also consumes "tts" for network TTS
+// requests via VoiceConsumerService) and then by advertised model; a single
+// failover retry is attempted via `isFailoverEligible` before the first
+// response chunk arrives (chat() only — VoiceConsumerService's requestTts
+// has no failover).
 //
 // Public API: encode, decode, MistllmConsumer/getMistllmConsumer,
 // MistllmProvider/getMistllmProvider. MistllmProvider additionally exposes
@@ -45,6 +48,7 @@ import {
     MESSAGES_JA,
     MistaiError,
     ProviderService,
+    VoiceConsumerService,
     decode,
     encode,
     formatMistaiCode,
@@ -185,11 +189,13 @@ async function acquireRoomExclusive(roomId, onEvent) {
  * consumer_hello, accumulates every announced provider into a table (updated
  * on each provider_hello, pruned on disconnect — mirrors mistai's
  * ConsumerClient), and delegates llm_request/response correlation (seq
- * reordering, inactivity timeout) to the library's ConsumerService.
- * `selectProvider` matches a request's service ("chat") and optional model
- * against the table; `chat()` retries once via `isFailoverEligible` if the
- * chosen provider disconnects/times out/rejects the service before any
- * response chunk arrives.
+ * reordering, inactivity timeout) to the library's ConsumerService, and
+ * tts_request/stt_request/response correlation to VoiceConsumerService.
+ * `selectProvider` matches a request's service ("chat" or "tts") and
+ * optional model against the table; `chat()` retries once via
+ * `isFailoverEligible` if the chosen provider disconnects/times
+ * out/rejects the service before any response chunk arrives (`tts()` does
+ * not retry — VoiceConsumerService has no failover support).
  *
  * Status is a small state machine surfaced to the UI:
  *   idle -> joining -> searching -> connected (providerId: first-discovered,
@@ -210,6 +216,7 @@ export class MistllmConsumer {
         this.providerTable = new Map();
         this.providerId = null; // first-discovered provider id, kept for UI backward compatibility
         this.providerModels = []; // union of every known provider's advertised models, deduped
+        this.providerVoices = []; // union of every known provider's advertised TTS voices, deduped
         this.errorMessage = '';
         this.errorCode = null; // MistaiErrorCode when the error came from the library, else null
         this.updatedAt = Date.now();
@@ -220,11 +227,15 @@ export class MistllmConsumer {
         this._helloInterval = null;
         // Sends go through this.node at call time so the service instance can
         // survive reconnects; before a room is joined this throws, which the
-        // caller (chat()) surfaces as a rejection just like the old code did.
-        this.service = new ConsumerService((toId, msg) => {
+        // caller (chat()/tts()) surfaces as a rejection just like the old
+        // code did. Shared by both services — chat and voice requests travel
+        // over the same room connection.
+        const send = (toId, msg) => {
             if (!this.node) throw new Error('Mist LLMネットワークに接続されていません。');
             this.node.sendMessage(toId, encode(msg), DELIVERY_RELIABLE);
-        });
+        };
+        this.service = new ConsumerService(send);
+        this.voiceService = new VoiceConsumerService(send);
     }
 
     getState() {
@@ -233,6 +244,7 @@ export class MistllmConsumer {
             providerId: this.providerId,
             providerCount: this.providerTable.size,
             providerModels: this.providerModels,
+            providerVoices: this.providerVoices,
             errorMessage: this.errorMessage,
             errorCode: this.errorCode,
             updatedAt: this.updatedAt,
@@ -247,7 +259,8 @@ export class MistllmConsumer {
 
     /**
      * Recomputes the backward-compatible `providerId` (first-discovered) /
-     * `providerModels` (deduped union) fields from `providerTable`. Callers
+     * `providerModels` / `providerVoices` (deduped unions) fields from
+     * `providerTable`. Callers
      * still emit explicitly afterwards (via _setStatus or _emit) so a single
      * notification covers both the table change and any status transition.
      */
@@ -262,6 +275,21 @@ export class MistllmConsumer {
             }
         });
         this.providerModels = anyModels ? Array.from(modelSet) : [];
+
+        // provider_hello.voices is the optional TTS-voice-name extension: an
+        // opaque list echoed straight back in tts_request.voice, so the
+        // settings UI can offer the room's real voices instead of guessing
+        // from the OpenAI catalog (mistai's unionVoices does the same for
+        // ConsumerClient's own status).
+        const voiceSet = new Set();
+        let anyVoices = false;
+        this.providerTable.forEach((info) => {
+            if (info.voices) {
+                anyVoices = true;
+                info.voices.forEach((v) => voiceSet.add(v));
+            }
+        });
+        this.providerVoices = anyVoices ? Array.from(voiceSet) : [];
     }
 
     _emit() {
@@ -299,10 +327,12 @@ export class MistllmConsumer {
         const generation = ++this.joinGeneration;
         this._teardownRoom();
         this.service.rejectAll(abortError('Mist LLMネットワークから切断されました。'));
+        this.voiceService.rejectAll(abortError('Mist LLMネットワークから切断されました。'));
         this._rejectAllProviderWaiters(new Error('接続がリセットされました。'));
         this.providerTable.clear();
         this.providerId = null;
         this.providerModels = [];
+        this.providerVoices = [];
         this.roomId = normalizedRoomId;
         this._setStatus('joining');
 
@@ -338,10 +368,12 @@ export class MistllmConsumer {
                     // rejected — an in-flight request to a different, still-
                     // connected provider is left alone (ConsumerService's
                     // rejectByProvider, v0.4+).
-                    this.service.rejectByProvider(
-                        fromId,
-                        new MistaiError('PROVIDER_DISCONNECTED', 'Connection to the provider was lost.'),
+                    const disconnectError = new MistaiError(
+                        'PROVIDER_DISCONNECTED',
+                        'Connection to the provider was lost.',
                     );
+                    this.service.rejectByProvider(fromId, disconnectError);
+                    this.voiceService.rejectByProvider(fromId, disconnectError);
                     this._refreshProviderFields();
                     if (this.providerTable.size === 0) {
                         // Auto-recovery: don't error out, just go back to
@@ -385,6 +417,7 @@ export class MistllmConsumer {
             const wasEmpty = this.providerTable.size === 0;
             this.providerTable.set(fromId, {
                 models: Array.isArray(msg.models) ? msg.models : undefined,
+                voices: Array.isArray(msg.voices) ? msg.voices : undefined,
                 services: helloServices(msg),
             });
             this._refreshProviderFields();
@@ -398,25 +431,30 @@ export class MistllmConsumer {
             return;
         }
 
-        // llm_response_chunk / llm_response_done / llm_error correlation lives
-        // in the library service; every other type no-ops there.
+        // llm_response_chunk / llm_response_done / llm_error correlation
+        // lives in the library's ConsumerService; tts_response/stt_response
+        // correlation lives in VoiceConsumerService. Both no-op on message
+        // types they don't own, so every message is simply offered to both.
         this.service.handleMessage(msg);
+        this.voiceService.handleMessage(msg);
     }
 
     /**
-     * Resolves once an eligible ("chat", matching `model` if given) provider
-     * is known, waiting up to PROVIDER_WAIT_TIMEOUT_MS for a provider_hello if
-     * none has arrived yet. Distinct from the (much longer) per-request
-     * timeout used by chat(). Resolves with a `{ providerId, model }`
-     * selection from mistai's selectProvider — `model` may differ from the
-     * requested one (omitted) per selectProvider's matching rules.
+     * Resolves once an eligible (`service`, matching `model` if given)
+     * provider is known, waiting up to PROVIDER_WAIT_TIMEOUT_MS for a
+     * provider_hello if none has arrived yet. Distinct from the (much
+     * longer) per-request timeout used by chat()/tts(). Resolves with a
+     * `{ providerId, model }` selection from mistai's selectProvider —
+     * `model` may differ from the requested one (omitted) per
+     * selectProvider's matching rules. `service` defaults to "chat" for the
+     * existing chat() call site; tts() passes "tts".
      */
-    waitForProvider(model) {
-        const immediate = selectProvider(this.providerTable, 'chat', model);
+    waitForProvider(model, service = 'chat') {
+        const immediate = selectProvider(this.providerTable, service, model);
         if (immediate) return Promise.resolve(immediate);
 
         return new Promise((resolve, reject) => {
-            const waiter = { model, resolve, reject, timer: null };
+            const waiter = { model, service, resolve, reject, timer: null };
             waiter.timer = setTimeout(() => {
                 const index = this.providerWaiters.indexOf(waiter);
                 if (index >= 0) this.providerWaiters.splice(index, 1);
@@ -436,7 +474,7 @@ export class MistllmConsumer {
         if (this.providerWaiters.length === 0) return;
         const remaining = [];
         this.providerWaiters.forEach((waiter) => {
-            const selection = selectProvider(this.providerTable, 'chat', waiter.model);
+            const selection = selectProvider(this.providerTable, waiter.service || 'chat', waiter.model);
             if (selection) {
                 clearTimeout(waiter.timer);
                 waiter.resolve(selection);
@@ -566,6 +604,39 @@ export class MistllmConsumer {
         });
     }
 
+    /**
+     * Requests speech synthesis from a room peer advertising the "tts"
+     * service and resolves with the audio Blob. Provider is chosen via
+     * `waitForProvider(model, 'tts')` — an omitted `model` matches any "tts"
+     * provider and lets it use its own default (see the `network-auto`
+     * sentinel handling in services/tts.js, which strips it before calling
+     * here); if none is found, the rejection carries waitForProvider's
+     * PROVIDER_NOT_FOUND_MESSAGE. Unlike chat(), VoiceConsumerService's
+     * requestTts has no failover retry and no AbortSignal support, so a
+     * single attempt is made and any failure is localized the same way
+     * chat() does.
+     *
+     * @param {string} text
+     * @param {{model?: string, voice?: string}} [options]
+     * @returns {Promise<Blob>}
+     */
+    async tts(text, options = {}) {
+        const { model, voice } = options;
+
+        if (!this.node) throw new Error('Mist LLMネットワークに接続されていません。');
+
+        const selection = await this.waitForProvider(model, 'tts');
+        try {
+            return await this.voiceService.requestTts(selection.providerId, {
+                text,
+                model: selection.model,
+                voice,
+            });
+        } catch (err) {
+            throw localizeMistaiError(err);
+        }
+    }
+
     _teardownRoom() {
         this._stopHelloRetry();
         if (this._release) {
@@ -582,7 +653,9 @@ export class MistllmConsumer {
         this.providerTable.clear();
         this.providerId = null;
         this.providerModels = [];
+        this.providerVoices = [];
         this.service.rejectAll(abortError('Mist LLMネットワークから切断されました。'));
+        this.voiceService.rejectAll(abortError('Mist LLMネットワークから切断されました。'));
         this._rejectAllProviderWaiters(new Error('接続が切断されました。'));
         this._setStatus('idle', { errorMessage: '', errorCode: null });
     }

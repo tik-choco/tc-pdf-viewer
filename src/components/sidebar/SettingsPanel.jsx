@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { Plus, Sparkles, X } from 'lucide-preact';
+import { Play, Plus, Sparkles, Volume2, X } from 'lucide-preact';
 import {
     AI_TASKS,
     REASONING_EFFORT_OPTIONS,
@@ -19,10 +19,28 @@ import {
     getTaskReasoningEffort,
     setTaskReasoningEffort,
 } from '../../services/ai';
-import { isNetworkProviderBaseUrl } from '../../services/networkModels';
+import {
+    findNetworkPseudoProvider,
+    isNetworkProviderBaseUrl,
+    NETWORK_VOICE_AUTO_MODEL,
+} from '../../services/networkModels';
+import {
+    getTtsSettings,
+    guessSpeechLang,
+    isBrowserTtsSupported,
+    pickBrowserVoice,
+    synthesizeSpeech,
+    updateTtsSettings,
+} from '../../services/tts';
 import { requestOnboarding } from '../../services/onboarding';
-import { MESSAGES_JA } from '@tik-choco/mistai';
-import { ConsumerStatusIndicator, ProviderStatusPanel } from '@tik-choco/mistai/preact';
+import { fetchVoices, MESSAGES_JA } from '@tik-choco/mistai';
+import {
+    buildTtsVoiceOptionValues,
+    ConsumerStatusIndicator,
+    ProviderStatusPanel,
+    resolveTtsVoiceOptions,
+    shouldShowTtsVoiceRow,
+} from '@tik-choco/mistai/preact';
 import { useMistllm } from '../../hooks/useMistllm';
 import { useNetworkProvider } from '../../hooks/useNetworkProvider';
 
@@ -61,6 +79,17 @@ const TASK_TIPS = {
     chat: 'AIチャットと要約に使うモデルです。',
     ocr: 'ページ画像からのテキスト抽出（Vision）に使うモデルです。',
 };
+
+const TTS_ENGINE_LABELS = {
+    browser: 'ブラウザ音声',
+    api: 'API',
+    network: 'AI Network',
+};
+
+const TTS_TEST_SAMPLE_TEXT = 'This is a preview of the selected voice.';
+
+// 発音確認用途では等倍より遅い側をよく使うので0.5から刻む。
+const TTS_SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 
 // getAvailableModels()は失敗を内部で握りつぶして空配列を返す実装のため、
 // 成功/失敗を区別できず「0件=取得失敗」で近似している（複数箇所で使う
@@ -191,6 +220,34 @@ export function SettingsPanel() {
 
     const [roomIdInput, setRoomIdInput] = useState(sharedConfig.network.roomId || '');
     const mistllm = useMistllm();
+
+    // --- TTS（読み上げ）: 他タスク行と同じく全項目「選択=即保存」のselect。
+    // 保存先は共有llm configの`tts`（providerId+model）で、エンジンはそこから
+    // 導出される（services/tts.js）ため、ドラフト入力state は持たない。
+    const [ttsTestState, setTtsTestState] = useState({ playing: false, error: '' });
+    const ttsSettings = getTtsSettings(sharedConfig);
+
+    // apiエンジンのボイス候補。OpenAI互換エンドポイントに voices 一覧APIは
+    // 無いことが多く、その場合fetchVoices()は[]を返してresolveTtsVoiceOptions
+    // 側の既定リストにフォールバックする。接続先を素早く切り替えたときに
+    // 1クリックごとにリクエストしないよう、モデル一覧fetchと同じくデバウンス。
+    const [fetchedApiVoices, setFetchedApiVoices] = useState([]);
+    useEffect(() => {
+        if (ttsSettings.engine !== 'api' || !ttsSettings.baseUrl.trim()) {
+            setFetchedApiVoices([]);
+            return;
+        }
+        let cancelled = false;
+        const timer = window.setTimeout(() => {
+            fetchVoices(ttsSettings.baseUrl, ttsSettings.apiKey).then((voices) => {
+                if (!cancelled) setFetchedApiVoices(voices);
+            });
+        }, 300);
+        return () => {
+            cancelled = true;
+            window.clearTimeout(timer);
+        };
+    }, [ttsSettings.engine, ttsSettings.baseUrl, ttsSettings.apiKey]);
 
     // providerId -> 最新のfetchProviderModels()呼び出しの世代番号。接続先の
     // 切替や、展開/編集中のbaseUrl・APIキー変更で再fetchが競合したとき
@@ -658,6 +715,72 @@ export function SettingsPanel() {
         refreshSharedConfig();
     };
 
+    // --- TTS（読み上げ） ----------------------------------------------------
+
+    // 保存は他のタスクselectと同じ「選択=決定」。sharedConfigの再読込は
+    // refreshSharedConfig()に委ねる（他のllm config書き込みハンドラと同じ流儀）。
+    const applyTtsPatch = (patch) => {
+        updateTtsSettings(patch);
+        refreshSharedConfig();
+    };
+
+    // モデルselectの選択肢は「AI接続」タブのモデル（preset）そのもの。保存形式は
+    // presetIdではなくproviderId+modelの組（共有configのvoice設定にpresetId欄が
+    // 無く、他アプリはproviderId/modelを直接読むため）。
+    const handleTtsModelSelectChange = (value) => {
+        if (value === '__current__') return; // 他アプリが書いた値の表示専用option
+        if (value === '') {
+            applyTtsPatch({ providerId: '', model: '' }); // = ブラウザ音声（tts entry削除）
+            return;
+        }
+        if (value === '__network__') {
+            applyTtsPatch({ providerId: networkVoiceProviderId, model: NETWORK_VOICE_AUTO_MODEL });
+            return;
+        }
+        const preset = sharedConfig.presets.find((p) => p.id === value);
+        if (!preset) return;
+        applyTtsPatch({ providerId: preset.providerId, model: preset.model });
+    };
+
+    // ブラウザ音声はWeb Speech APIで直接発話し、API/AI Networkは
+    // synthesizeSpeech()が返すBlobをAudioで再生する。どちらの経路も例外を
+    // 握りつぶし、日本語のエラー行として表示する（render内へ投げない）。
+    const handleTtsTestPlay = async () => {
+        setTtsTestState({ playing: true, error: '' });
+        try {
+            if (ttsSettings.engine === 'browser') {
+                if (!isBrowserTtsSupported()) throw new Error('このブラウザは音声合成に対応していません。');
+                const lang = guessSpeechLang(TTS_TEST_SAMPLE_TEXT);
+                const utterance = new SpeechSynthesisUtterance(TTS_TEST_SAMPLE_TEXT);
+                utterance.lang = lang;
+                const voice = pickBrowserVoice(lang);
+                if (voice) utterance.voice = voice;
+                if (typeof ttsSettings.speed === 'number') utterance.rate = ttsSettings.speed;
+                await new Promise((resolve, reject) => {
+                    utterance.onend = () => resolve();
+                    utterance.onerror = (event) => reject(new Error(event.error || '再生に失敗しました。'));
+                    window.speechSynthesis.speak(utterance);
+                });
+            } else {
+                const blob = await synthesizeSpeech(TTS_TEST_SAMPLE_TEXT, { settings: ttsSettings });
+                const url = URL.createObjectURL(blob);
+                try {
+                    await new Promise((resolve, reject) => {
+                        const audio = new Audio(url);
+                        audio.onended = () => resolve();
+                        audio.onerror = () => reject(new Error('再生に失敗しました。'));
+                        audio.play().catch(reject);
+                    });
+                } finally {
+                    URL.revokeObjectURL(url);
+                }
+            }
+            setTtsTestState({ playing: false, error: '' });
+        } catch (err) {
+            setTtsTestState({ playing: false, error: err?.message || 'テスト再生に失敗しました。' });
+        }
+    };
+
     // The mistllm consumer connection itself is maintained eagerly at the app
     // level (see hooks/useNetworkConsumerConnection.js, mounted in App.jsx) so
     // it stays live whether or not this panel is open; this panel only
@@ -665,10 +788,18 @@ export function SettingsPanel() {
 
     const isMistllm = settings.backend === 'mistllm';
     const mistllmProviderModels = Array.isArray(mistllm.providerModels) ? mistllm.providerModels : [];
+    // provider_hello.voices の合算（読み上げのボイスselectの選択肢）。誰も
+    // 広告していなければフィールドごと省く（ConsumerStatus.voices は optional）。
+    const mistllmProviderVoices = Array.isArray(mistllm.providerVoices) ? mistllm.providerVoices : [];
     // Adapt the app's flat useMistllm() state to the library's ConsumerStatus
     // discriminated union consumed by the shared status components.
     const consumerStatus = mistllm.status === 'connected'
-        ? { phase: 'connected', providerId: mistllm.providerId || '', models: mistllmProviderModels }
+        ? {
+            phase: 'connected',
+            providerId: mistllm.providerId || '',
+            models: mistllmProviderModels,
+            ...(mistllmProviderVoices.length > 0 ? { voices: mistllmProviderVoices } : {}),
+        }
         : mistllm.status === 'error'
             // codeがあれば共有コンポーネント側でカタログ文言に整えられる（messageはフォールバック）。
             ? { phase: 'error', message: mistllm.errorMessage || '', code: mistllm.errorCode || undefined }
@@ -1180,51 +1311,207 @@ export function SettingsPanel() {
     // その場では解決できないカードを見せない。
     const networkConnected = consumerStatus.phase === 'connected';
 
+    // 読み上げ用の導出値。「AI Networkにおまかせ」= ルームの疑似provider +
+    // network-autoセンチネル（＝モデルはルーム側の既定に任せる）。保存済みの
+    // providerId+modelがどのpresetとも一致しない場合（他アプリが書いた、または
+    // preset削除後）は、黙って「未設定」に見せず読み取り専用optionとして残す。
+    const networkVoiceProviderId = findNetworkPseudoProvider(sharedConfig, sharedConfig.network.roomId)?.id || '';
+    const isTtsNetworkAuto =
+        networkVoiceProviderId !== '' &&
+        ttsSettings.providerId === networkVoiceProviderId &&
+        ttsSettings.model === NETWORK_VOICE_AUTO_MODEL;
+    const matchedTtsPreset = sharedConfig.presets.find(
+        (preset) => preset.providerId === ttsSettings.providerId && preset.model === ttsSettings.model,
+    );
+    const ttsModelSelectValue = isTtsNetworkAuto
+        ? '__network__'
+        : matchedTtsPreset
+            ? matchedTtsPreset.id
+            : ttsSettings.model.trim() && ttsSettings.model !== NETWORK_VOICE_AUTO_MODEL
+                ? '__current__'
+                : '';
+    // ボイス欄はブラウザ音声では出さない（SpeechSynthesisUtterance側が自分で
+    // 選ぶのでwire上の"voice"概念が無い）。候補はnetworkならルームが広告した
+    // voices、apiならfetchVoices()の結果、無ければ既定リスト（mistaiの共有ロジック）。
+    const showTtsVoiceRow = shouldShowTtsVoiceRow(true, ttsSettings.engine);
+    const ttsVoiceOptions = showTtsVoiceRow
+        ? buildTtsVoiceOptionValues(
+              resolveTtsVoiceOptions({ engine: ttsSettings.engine, consumerStatus, fetchedApiVoices }),
+              ttsSettings.voice,
+          )
+        : [];
+
     // タスクタブ: 常時表示のヒント段落は置かず、各行ラベルのhoverツールチップ
     // （data-tip、CSS側はindex.cssの `.task-model-item > span[data-tip]`）に
     // 説明を持たせる（spec §3.2/§4）。preset selectの選択肢は共有presets全部
     // （Network由来カード含む — 選べばそのタスクの経路もnetworkになる。ただし
     // 未接続時はNetwork由来を除外し、選択肢にはoption-networkクラス、選択中
     // ならselect横にNetworkバッジを添えて一目で区別できるようにする）。
-    const renderTasksTab = () => (
+    // タスクタブの下部に置く「読み上げ（TTS）」セクション。エンジンは他の
+    // タスクと同じ「プリセット選択」ではなく、services/tts.jsが共有llm
+    // configから導出するengineに従うため、ここでは接続先(provider)/モデル/
+    // ボイス/速度を直接編集する（spec: 選択したテキストのTTS、mist-network
+    // 疑似providerも選択可）。
+    const renderTtsSection = () => (
         <div className="form-group">
-            {AI_TASKS.map((task) => (
-                <div key={task} className="task-model-item">
-                    <span data-tip={TASK_TIPS[task]}>{TASK_LABELS[task]}</span>
-                    <div className="task-model-fields">
-                        <div className="task-model-field">
-                            <div className="task-model-select-row">
-                                <select
-                                    id={`select-preset-${task}`}
-                                    name={`select-preset-${task}`}
-                                    aria-label={`${TASK_LABELS[task]}のモデル`}
-                                    value={settings.taskPresetIds[task] || ''}
-                                    onChange={(event) => handleTaskPresetChange(task, event.target.value)}
-                                    autoComplete="off"
-                                >
-                                    <option value="">既定と同じ</option>
-                                    {sharedConfig.presets
-                                        .filter((preset) => networkConnected || !isNetworkPresetProvider(preset.providerId))
-                                        .map((preset) => (
-                                            <option
-                                                key={preset.id}
-                                                value={preset.id}
-                                                className={isNetworkPresetProvider(preset.providerId) ? 'option-network' : undefined}
-                                            >
-                                                {preset.label}（{getProviderLabel(preset.providerId)}）
-                                            </option>
-                                        ))}
-                                </select>
-                                {networkConnected && isNetworkPreset(settings.taskPresetIds[task]) && (
-                                    <span className="task-badge task-badge-network">Network由来</span>
+            <div className="server-list-header">
+                <label>
+                    <Volume2 size={13} /> 読み上げ（TTS）
+                </label>
+            </div>
+            <p className="hint">選択したテキストの読み上げに使うモデルです。未設定なら無料・オフラインのブラウザ音声で再生されます。</p>
+
+            <div className="task-model-item">
+                <span data-tip="読み上げに使うモデルです。「AI接続」タブのモデルから選ぶと、その接続先で音声合成します。">モデル</span>
+                <div className="task-model-fields">
+                    <div className="task-model-field">
+                        <div className="task-model-select-row">
+                            <select
+                                id="select-tts-model"
+                                name="select-tts-model"
+                                aria-label="読み上げのモデル"
+                                value={ttsModelSelectValue}
+                                onChange={(event) => handleTtsModelSelectChange(event.target.value)}
+                                autoComplete="off"
+                            >
+                                <option value="">ブラウザ音声（無料・オフライン）</option>
+                                {networkVoiceProviderId && networkConnected && (
+                                    <option value="__network__" className="option-network">AI Networkにおまかせ</option>
                                 )}
-                            </div>
+                                {ttsModelSelectValue === '__current__' && (
+                                    <option value="__current__">{ttsSettings.model}</option>
+                                )}
+                                {sharedConfig.presets
+                                    .filter((preset) => networkConnected || !isNetworkPresetProvider(preset.providerId))
+                                    .map((preset) => (
+                                        <option
+                                            key={preset.id}
+                                            value={preset.id}
+                                            className={isNetworkPresetProvider(preset.providerId) ? 'option-network' : undefined}
+                                        >
+                                            {preset.label}（{getProviderLabel(preset.providerId)}）
+                                        </option>
+                                    ))}
+                            </select>
+                            {networkConnected && (isTtsNetworkAuto || (matchedTtsPreset && isNetworkPresetProvider(matchedTtsPreset.providerId))) && (
+                                <span className="task-badge task-badge-network">Network由来</span>
+                            )}
                         </div>
-                        {renderReasoningEffortSelect(task)}
                     </div>
                 </div>
-            ))}
+            </div>
+
+            {showTtsVoiceRow && (
+                <>
+                    <div className="task-model-item">
+                        <span data-tip="音声合成に使う声です。「プロバイダーの既定」なら接続先の設定に任せます。">ボイス</span>
+                        <div className="task-model-fields">
+                            <div className="task-model-field">
+                                <select
+                                    id="select-tts-voice"
+                                    name="select-tts-voice"
+                                    aria-label="読み上げのボイス"
+                                    value={ttsSettings.voice}
+                                    onChange={(event) => applyTtsPatch({ voice: event.target.value })}
+                                    autoComplete="off"
+                                >
+                                    {ttsVoiceOptions.map((voice) => (
+                                        <option key={voice || '__default__'} value={voice}>
+                                            {voice === '' ? 'プロバイダーの既定' : voice}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="task-model-item">
+                        <span data-tip="発音を確認したいときは遅めのほうが聞き取りやすくなります。">速度</span>
+                        <div className="task-model-fields">
+                            <div className="task-model-field">
+                                <select
+                                    id="select-tts-speed"
+                                    name="select-tts-speed"
+                                    aria-label="読み上げの速度"
+                                    value={ttsSettings.speed === undefined ? '' : String(ttsSettings.speed)}
+                                    onChange={(event) => applyTtsPatch({ speed: event.target.value === '' ? null : Number(event.target.value) })}
+                                    autoComplete="off"
+                                >
+                                    <option value="">プロバイダーの既定</option>
+                                    {TTS_SPEED_OPTIONS.map((speed) => (
+                                        <option key={speed} value={String(speed)}>{speed}x</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </>
+            )}
+
+            <p className="hint">現在のエンジン: {TTS_ENGINE_LABELS[ttsSettings.engine]}</p>
+            {ttsSettings.engine === 'api' && !ttsSettings.baseUrl && (
+                <p className="hint connection-form-warning">
+                    接続先が解決できません（モデルの接続先が削除された可能性があります）。再生時はブラウザ音声にフォールバックします。
+                </p>
+            )}
+
+            {/* connection-form-btnは flex:1 の行内ボタン前提なので、他の
+                ボタン同様 model-row-add-actions の行に入れて幅を内容に合わせる。 */}
+            <div className="model-row-add-actions">
+                <button type="button" className="connection-form-btn" onClick={handleTtsTestPlay} disabled={ttsTestState.playing}>
+                    <Play size={13} />
+                    {ttsTestState.playing ? '再生中…' : 'テスト再生'}
+                </button>
+            </div>
+            {ttsTestState.error && <p className="hint connection-form-warning">{ttsTestState.error}</p>}
         </div>
+    );
+
+    const renderTasksTab = () => (
+        <>
+            <div className="form-group">
+                {AI_TASKS.map((task) => (
+                    <div key={task} className="task-model-item">
+                        <span data-tip={TASK_TIPS[task]}>{TASK_LABELS[task]}</span>
+                        <div className="task-model-fields">
+                            <div className="task-model-field">
+                                <div className="task-model-select-row">
+                                    <select
+                                        id={`select-preset-${task}`}
+                                        name={`select-preset-${task}`}
+                                        aria-label={`${TASK_LABELS[task]}のモデル`}
+                                        value={settings.taskPresetIds[task] || ''}
+                                        onChange={(event) => handleTaskPresetChange(task, event.target.value)}
+                                        autoComplete="off"
+                                    >
+                                        <option value="">既定と同じ</option>
+                                        {sharedConfig.presets
+                                            .filter((preset) => networkConnected || !isNetworkPresetProvider(preset.providerId))
+                                            .map((preset) => (
+                                                <option
+                                                    key={preset.id}
+                                                    value={preset.id}
+                                                    className={isNetworkPresetProvider(preset.providerId) ? 'option-network' : undefined}
+                                                >
+                                                    {preset.label}（{getProviderLabel(preset.providerId)}）
+                                                </option>
+                                            ))}
+                                    </select>
+                                    {networkConnected && isNetworkPreset(settings.taskPresetIds[task]) && (
+                                        <span className="task-badge task-badge-network">Network由来</span>
+                                    )}
+                                </div>
+                            </div>
+                            {renderReasoningEffortSelect(task)}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <hr className="settings-section-divider" />
+
+            {renderTtsSection()}
+        </>
     );
 
     return (

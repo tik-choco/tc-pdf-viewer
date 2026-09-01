@@ -5,9 +5,9 @@
 // special-case it (no HTTP model fetch, network transport routing).
 //
 // JS+JSDoc port of tc-translate's src/lib/networkModels.ts (see
-// tc-docs/drafts/llm-settings-common-v1.md §2.2/§4.2). This app has no
-// voice/TTS/STT feature, so the voice `network-auto` sentinel from the
-// reference file is intentionally not ported here.
+// tc-docs/drafts/llm-settings-common-v1.md §2.2/§4.2), including the voice
+// `network-auto` sentinel now that this app has a TTS feature (see
+// services/tts.js / services/mistllm.js).
 
 import { normalizeBaseUrl } from './llmConfig';
 
@@ -80,4 +80,25 @@ export function findNetworkPseudoProvider(config, roomId) {
  */
 export function presetsForProvider(config, providerId) {
     return config.presets.filter((p) => p.providerId === providerId);
+}
+
+/**
+ * Sentinel voice-config model meaning "let the room's provider use its own
+ * configured TTS/STT model". Stored in the shared config's tts/stt model
+ * field alongside a mist-network pseudo-provider id; stripped from outgoing
+ * requests (an omitted wire model -> provider's own default).
+ */
+export const NETWORK_VOICE_AUTO_MODEL = 'network-auto';
+
+/**
+ * Maps a configured voice model to the wire request param: the auto
+ * sentinel becomes undefined (omit), anything else passes through (blank
+ * also becomes undefined).
+ *
+ * @param {string} model
+ * @returns {string | undefined}
+ */
+export function networkVoiceModelParam(model) {
+    const trimmed = (model || '').trim();
+    return !trimmed || trimmed === NETWORK_VOICE_AUTO_MODEL ? undefined : trimmed;
 }
