@@ -1,9 +1,22 @@
 import { useEffect, useState, useRef } from 'preact/hooks';
-import { Sparkles, X, Copy, Check, Languages, ChevronDown } from 'lucide-preact';
+import { Sparkles, X, Copy, Check, Languages, ChevronDown, Volume2, Square, Loader } from 'lucide-preact';
 import { getAiSettings } from '../services/ai';
 import { renderMarkdown } from '../utils/markdown';
 
-export default function Tooltip({ text, currentTerm, position, isVisible, onClose, onRequestExplanation, onRequestTranslation, onSwitchLanguage, lastLang }) {
+/**
+ * Speech input for an AI result: the rendered markdown's text content, so
+ * headings/list bullets/code fences aren't read out as literal punctuation.
+ */
+function speechTextFromHtml(html) {
+  if (!html) return '';
+  try {
+    return new DOMParser().parseFromString(html, 'text/html').body.textContent?.trim() || '';
+  } catch {
+    return '';
+  }
+}
+
+export default function Tooltip({ text, currentTerm, position, isVisible, onClose, onRequestExplanation, onRequestTranslation, onSwitchLanguage, lastLang, onSpeak, ttsSupported = false, speakingId = null, ttsLoadingId = null, ttsError = '' }) {
   const tooltipRef = useRef(null);
   const [offset, setOffset] = useState({ x: 15, y: 15 });
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
@@ -130,6 +143,20 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
 
   const smoothEasing = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
+  // The header's speak button reads whatever the tooltip is currently
+  // showing: the selection while idle, the AI result once there is one. It
+  // stays in the header (rather than joining the idle action row) because a
+  // third button doesn't fit the 300px tooltip without wrapping the labels.
+  const speechTarget = text
+    ? { id: 'result', value: speechTextFromHtml(htmlContent), title: '結果を読み上げ' }
+    : { id: 'selection', value: currentTerm, title: '選択テキストを読み上げ' };
+
+  const speakIcon = (id) => {
+    if (ttsLoadingId === id) return <Loader size={14} className="tts-spin" />;
+    if (speakingId === id) return <Square size={14} />;
+    return <Volume2 size={14} />;
+  };
+
   return (
     <div
       ref={tooltipRef}
@@ -156,6 +183,15 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
             <span className="ai-label">{text === 'loading' ? '処理中...' : text ? 'AI 結果' : '選択中の文章'}</span>
           </div>
           <div className="header-actions">
+            {ttsSupported && text !== 'loading' && (
+              <button
+                className={`icon-action-btn ${speakingId === speechTarget.id ? 'is-speaking' : ''}`}
+                onClick={() => onSpeak?.(speechTarget.value, speechTarget.id)}
+                title={speakingId === speechTarget.id ? '読み上げを停止' : speechTarget.title}
+              >
+                {speakIcon(speechTarget.id)}
+              </button>
+            )}
             {text && text !== 'loading' && (
               <button className="icon-action-btn" onClick={handleCopy} title="結果をコピー">
                 {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
@@ -221,6 +257,8 @@ export default function Tooltip({ text, currentTerm, position, isVisible, onClos
               </div>
             </div>
           )}
+
+          {ttsError && <div className="tooltip-tts-error">{ttsError}</div>}
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite';
 import preact from '@preact/preset-vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -26,6 +26,17 @@ export default defineConfig(({ mode }) => {
   return {
     base: process.env.VITE_BASE_PATH || '/tc-pdf-viewer/',
     resolve: { alias },
+    server: {
+      fs: {
+        // MISTLIB_LOCAL points outside this app's root (a sibling mistlib-dev
+        // checkout), and Vite's dev server 403s /@fs/ requests for anything
+        // outside server.fs.allow — so the wasm itself fails to load unless
+        // that directory is explicitly allow-listed here.
+        allow: localEngine
+          ? [searchForWorkspaceRoot(process.cwd()), alias['@tik-choco/mistlib']]
+          : [searchForWorkspaceRoot(process.cwd())]
+      }
+    },
     plugins: [
       preact(),
       VitePWA({

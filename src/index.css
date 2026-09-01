@@ -2778,6 +2778,25 @@ option.option-network {
   color: var(--on-primary);
 }
 
+/* 読み上げ(TTS)ボタンはツールチップのヘッダー（コピー/閉じると同じ並び）に
+   置く。アクション行に3つ目のボタンを足すと幅300pxではラベルが折り返す。 */
+.icon-action-btn.is-speaking {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.tts-spin {
+  animation: spin 1s linear infinite;
+}
+
+.tooltip-tts-error {
+  margin-top: 8px;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--danger);
+  word-break: break-word;
+}
+
 .lang-main-btn,
 .lang-toggle-btn {
   background: var(--surface-2);
@@ -3788,4 +3807,14 @@ option.option-network {
   .ob-footer {
     flex-wrap: wrap;
   }
+}
+
+/* --- TTS（読み上げ）セクション、タスクタブ末尾 --- */
+
+/* server-list-header labelはテキストのみを想定しているため、TTSセクションの
+   見出しだけアイコン+テキストの横並びにする（既存の見出しレイアウトは
+   変更しない）。 */
+.server-list-header label svg {
+  vertical-align: -2px;
+  margin-right: 2px;
 }
