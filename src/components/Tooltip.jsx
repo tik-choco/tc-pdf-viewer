@@ -11,6 +11,9 @@ import { renderMarkdown } from '../utils/markdown';
  */
 const STREAM_RESERVE_PX = 260;
 
+/** How close to the bottom still counts as "following the stream". */
+const STICK_THRESHOLD_PX = 24;
+
 /** Smallest box a hand-resize may drag the result panel down to. */
 const MIN_SIZE = { w: 220, h: 140 };
 
@@ -53,6 +56,7 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
   const resizeStartRef = useRef(null);
   const measureRef = useRef(null);
   const scrollAreaRef = useRef(null);
+  const stickToBottomRef = useRef(true);
   const placementLockedRef = useRef(false);
 
   const isResult = Boolean(text) && text !== 'loading';
@@ -219,10 +223,23 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
     }
   }, [isVisible]);
 
-  // Once the answer is taller than the panel, keep the newest streamed text in
-  // view instead of leaving the user staring at the first paragraph.
+  // A fresh answer starts following again, however the last one was left.
   useEffect(() => {
-    if (!isStreaming) return;
+    stickToBottomRef.current = true;
+  }, [currentTerm, isStreaming]);
+
+  // Once the answer is taller than the panel, keep the newest streamed text in
+  // view instead of leaving the user staring at the first paragraph -- but only
+  // while the view is still at the bottom. Scrolling up to re-read something
+  // detaches it until the user scrolls back down.
+  const handleScrollAreaScroll = () => {
+    const area = scrollAreaRef.current;
+    if (!area) return;
+    stickToBottomRef.current = area.scrollHeight - area.scrollTop - area.clientHeight <= STICK_THRESHOLD_PX;
+  };
+
+  useEffect(() => {
+    if (!isStreaming || !stickToBottomRef.current) return;
     const area = scrollAreaRef.current;
     if (area) area.scrollTop = area.scrollHeight;
   }, [htmlContent, isStreaming]);
@@ -337,7 +354,7 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
               <span>解析中...</span>
             </div>
           ) : text ? (
-            <div className="tooltip-scroll-area" ref={scrollAreaRef}>
+            <div className="tooltip-scroll-area" ref={scrollAreaRef} onScroll={handleScrollAreaScroll}>
               <div
                 className={`explanation-text markdown-body ${isStreaming ? 'is-streaming' : ''}`}
                 dangerouslySetInnerHTML={{ __html: htmlContent }}
