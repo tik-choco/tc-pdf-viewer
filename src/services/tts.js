@@ -169,6 +169,300 @@ export function pickBrowserVoice(lang) {
     );
 }
 
+/**
+ * Chunk size used when a long text is synthesized piece by piece so playback
+ * can start on the first sentence instead of the whole paragraph. Small enough
+ * that the first request returns quickly, large enough that the seams between
+ * chunks stay rare (and each chunk keeps enough context for prosody).
+ */
+export const SPEECH_CHUNK_CHARS = 140;
+
+/** Text below this length is synthesized in one shot: splitting it only adds round trips. */
+export const SPEECH_CHUNK_MIN_CHARS = 200;
+
+/**
+ * The first chunk is kept shorter than the rest: synthesis time scales with
+ * the text, and this one is the only chunk the listener actually waits for.
+ * It is only ever cut at a sentence or clause break, never mid-phrase.
+ */
+export const SPEECH_FIRST_CHUNK_CHARS = 70;
+
+/** A sentence may run this much past `maxChars` before it is cut mid-phrase. */
+const OVERLONG_SENTENCE_FACTOR = 3;
+
+const SENTENCE_ENDERS = '。．！？!?…';
+const SENTENCE_TAIL = '"\'”’」』）)]';
+const CLAUSE_BREAKS = '、，,；;：:';
+
+/**
+ * A line shorter than this fraction of the paragraph's widest line ended
+ * because its content ended, not because the page ran out of width — a
+ * heading, a label, a list item — so the break after it is a real one.
+ */
+const SHORT_LINE_RATIO = 0.5;
+
+/**
+ * Words whose trailing dot is an abbreviation rather than a sentence end.
+ * Only the ones that show up in the documents this viewer is pointed at, and
+ * only those a following capital or digit ("Fig. 2", "Dr. Smith") would
+ * otherwise fool; a lowercase continuation is already handled without a list.
+ */
+const ABBREVIATIONS = new Set([
+    'mr', 'mrs', 'ms', 'dr', 'prof', 'sr', 'jr', 'st', 'vs', 'cf', 'etc', 'al', 'approx',
+    'fig', 'figs', 'eq', 'eqs', 'no', 'nos', 'vol', 'vols', 'ch', 'chap', 'sec', 'secs',
+    'pp', 'ref', 'refs', 'dept', 'univ', 'inc', 'ltd', 'co',
+]);
+
+/**
+ * Rebuilds the paragraph structure of text that was hard-wrapped somewhere
+ * else — PDF selections in particular, where a line break lands wherever the
+ * page column ended, often mid-sentence.
+ *
+ * Kept separate from the chunking because it matters even for a text short
+ * enough to be synthesized in one piece: a stray newline inside a sentence
+ * makes both the browser voice and most TTS models pause as if it were a
+ * sentence end.
+ *
+ * A line break survives only where it really ends something (a blank line, or
+ * a line ending in sentence punctuation); otherwise the lines are rejoined —
+ * with a space where Latin text needs one, and with nothing between CJK, whose
+ * words don't take spaces. A word hyphenated across a line break is repaired.
+ *
+ * @param {string} text
+ * @returns {string} paragraphs, one per line
+ */
+export function normalizeSpeechText(text) {
+    return (text || '')
+        .replace(/\r\n?/g, '\n')
+        .split(/\n[^\S\n]*\n\s*/)
+        .map(unwrapParagraph)
+        .filter(Boolean)
+        .join('\n');
+}
+
+function unwrapParagraph(paragraph) {
+    const lines = paragraph
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    // The widest line is the column width the text was wrapped to; anything
+    // much shorter than it ended on purpose.
+    const bodyWidth = lines.reduce((widest, line) => Math.max(widest, line.length), 0);
+
+    let out = '';
+    let previous = '';
+    for (const line of lines) {
+        if (!out) {
+            out = line;
+            previous = line;
+            continue;
+        }
+        if (/[A-Za-z]-$/.test(previous) && /^[a-z]/.test(line)) {
+            // "informa-" + "tion": a word the page layout broke across lines.
+            out = `${out.slice(0, -1)}${line}`;
+        } else if (endsSentence(previous) || previous.length < bodyWidth * SHORT_LINE_RATIO) {
+            // A real break — kept so the chunker can split here even when the
+            // line is a heading or a bullet with no punctuation of its own.
+            out = `${out}\n${line}`;
+        } else {
+            out += needsSpaceBetween(out, line) ? ` ${line}` : line;
+        }
+        previous = line;
+    }
+    return out;
+}
+
+/** True when `line` ends with sentence punctuation (plus any closing quotes/brackets). */
+function endsSentence(line) {
+    let i = line.length - 1;
+    while (i >= 0 && SENTENCE_TAIL.includes(line[i])) i -= 1;
+    return i >= 0 && (SENTENCE_ENDERS.includes(line[i]) || line[i] === '.');
+}
+
+/** Latin text needs the word gap that wrapping removed; CJK does not. */
+function needsSpaceBetween(left, right) {
+    return /[\w)\]"'”’.,!?;:]$/.test(left) && /^[\w("'“‘]/.test(right);
+}
+
+/**
+ * Splits `text` into speakable chunks of at most `maxChars`, cutting at
+ * sentence ends first and clause punctuation second. A sentence is only cut
+ * mid-phrase once it runs past three times `maxChars`: a seam inside a phrase
+ * is read with a falling, "that was the end" intonation, which costs more than
+ * the extra synthesis time of one long chunk.
+ *
+ * Used by hooks/useTts.js to pipeline synthesis: chunk N plays while chunk N+1
+ * is still being synthesized, so the wait before the first sound is set by the
+ * first chunk rather than by the whole text.
+ *
+ * @param {string} text
+ * @param {number} [maxChars]
+ * @param {number} [firstMaxChars] cap for the first chunk only (see SPEECH_FIRST_CHUNK_CHARS)
+ * @returns {string[]} non-empty chunks; `[]` for blank input
+ */
+export function splitTextForSpeech(text, maxChars = SPEECH_CHUNK_CHARS, firstMaxChars = maxChars) {
+    const source = normalizeSpeechText(text).trim();
+    if (!source) return [];
+    if (source.length <= maxChars) return [source];
+
+    /** @type {string[]} */
+    const parts = [];
+    for (const sentence of splitIntoSentences(source)) {
+        parts.push(...splitOverlongPart(sentence, maxChars));
+    }
+
+    /** @type {string[]} */
+    const chunks = [];
+    let buffer = '';
+    const flush = () => {
+        if (buffer.trim()) chunks.push(buffer.trim());
+        buffer = '';
+    };
+
+    for (const part of parts) {
+        const glue = needsSpaceBetween(buffer, part) ? ' ' : '';
+        if (!buffer) {
+            // A part longer than the cap is one splitOverlongPart chose to
+            // keep whole; it becomes its own chunk rather than being cut.
+            buffer = part;
+        } else if (buffer.length + glue.length + part.length <= maxChars) {
+            buffer = `${buffer}${glue}${part}`;
+        } else {
+            flush();
+            buffer = part;
+        }
+    }
+    flush();
+
+    return capFirstChunk(chunks, firstMaxChars);
+}
+
+/**
+ * Cuts the opening chunk down toward `firstMaxChars` so playback starts sooner
+ * — but only at a sentence or clause break, and only if one sits far enough
+ * in. A first chunk with no natural pause is left alone.
+ */
+function capFirstChunk(chunks, firstMaxChars) {
+    const first = chunks[0];
+    if (!first || first.length <= firstMaxChars) return chunks;
+
+    const breakAt = lastNaturalBreak(first.slice(0, firstMaxChars));
+    if (breakAt < firstMaxChars * 0.35) return chunks;
+
+    const head = first.slice(0, breakAt + 1).trim();
+    const tail = first.slice(breakAt + 1).trim();
+    if (!head || !tail) return chunks;
+    return [head, tail, ...chunks.slice(1)];
+}
+
+/**
+ * Cuts `source` after each sentence end, keeping the trailing run of closing
+ * quotes/brackets with the sentence it ends (so no chunk starts with 」or ).
+ * A full stop ends a sentence only when whitespace or the end of the text
+ * follows it — and not after an initial ("J. R. R.") nor before a lowercase
+ * word ("e.g. this"), which keeps abbreviations and "3.14" in one piece.
+ *
+ * Written as a scan rather than a lookbehind regex: lookbehind is missing from
+ * older Safari, and a regex literal it can't parse would take the whole module
+ * (and with it the app) down at load time.
+ */
+function splitIntoSentences(source) {
+    const sentences = [];
+    let start = 0;
+    for (let i = 0; i < source.length; i += 1) {
+        if (source[i] !== '\n' && !isSentenceEnd(source, i)) continue;
+
+        let end = i + 1;
+        while (end < source.length && SENTENCE_TAIL.includes(source[end])) end += 1;
+
+        sentences.push(source.slice(start, end));
+        start = end;
+        i = end - 1;
+    }
+    if (start < source.length) sentences.push(source.slice(start));
+
+    return sentences.map((piece) => piece.trim()).filter(Boolean);
+}
+
+/** True when the character at `i` closes a sentence (see splitIntoSentences). */
+function isSentenceEnd(source, i) {
+    const ch = source[i];
+    if (SENTENCE_ENDERS.includes(ch)) return true;
+    if (ch !== '.') return false;
+
+    let after = i + 1;
+    while (after < source.length && SENTENCE_TAIL.includes(source[after])) after += 1;
+    if (after < source.length && !/\s/.test(source[after])) return false; // 3.14 / report.txt
+
+    // "e.g. this" / "vs. the": a lowercase continuation isn't a new sentence.
+    const next = source.slice(after).match(/\S/);
+    if (next && /[a-z]/.test(next[0])) return false;
+
+    const before = source.slice(0, i).match(/[^\s.]+$/);
+    if (!before) return true;
+    // A single letter before the dot is an initial, not a sentence ("J. Smith").
+    if (before[0].length === 1) return false;
+    return !ABBREVIATIONS.has(before[0].toLowerCase());
+}
+
+/**
+ * Breaks a sentence that runs far past `maxChars` at clause punctuation, then
+ * at a space, and only hard-cuts a run with no break at all (a long URL, a CJK
+ * sentence with no punctuation). A sentence within OVERLONG_SENTENCE_FACTOR of
+ * the cap is returned whole.
+ */
+function splitOverlongPart(part, maxChars) {
+    if (part.length <= maxChars) return [part];
+
+    const out = [];
+    let rest = part;
+    while (rest.length > maxChars) {
+        const breakAt = lastClauseBreak(rest.slice(0, maxChars));
+        if (breakAt >= maxChars * 0.4) {
+            out.push(rest.slice(0, breakAt + 1).trim());
+            rest = rest.slice(breakAt + 1).trim();
+            continue;
+        }
+        // No natural pause in reach: keep the phrase together unless it has
+        // grown long enough that one chunk would stall playback outright.
+        if (rest.length <= maxChars * OVERLONG_SENTENCE_FACTOR) break;
+        out.push(rest.slice(0, maxChars).trim());
+        rest = rest.slice(maxChars).trim();
+    }
+    if (rest) out.push(rest);
+    return out.filter(Boolean);
+}
+
+/**
+ * Index of the last sentence end inside `window`, else its last clause break;
+ * -1 if neither. Spaces don't count: this decides where the *first* chunk ends
+ * early, and a seam between two words of one phrase is exactly the unnatural
+ * break the chunker is trying to avoid.
+ */
+function lastNaturalBreak(window) {
+    for (let i = window.length - 1; i >= 0; i -= 1) {
+        if (!isSentenceEnd(window, i)) continue;
+        let end = i;
+        while (end + 1 < window.length && SENTENCE_TAIL.includes(window[end + 1])) end += 1;
+        return end;
+    }
+    return lastClauseBreak(window, { allowSpace: false });
+}
+
+/**
+ * Index of the last clause break (、, ; :) inside `window`, falling back to
+ * the last space. Punctuation is searched for across the whole window first:
+ * a space is a far worse place to stop, so a comma anywhere in the window
+ * beats a space at its end.
+ */
+function lastClauseBreak(window, { allowSpace = true } = {}) {
+    for (let i = window.length - 1; i >= 0; i -= 1) {
+        if (CLAUSE_BREAKS.includes(window[i])) return i;
+    }
+    return allowSpace ? window.lastIndexOf(' ') : -1;
+}
+
 function authHeaders(apiKey) {
     return apiKey && apiKey.trim() ? { Authorization: `Bearer ${apiKey}` } : {};
 }

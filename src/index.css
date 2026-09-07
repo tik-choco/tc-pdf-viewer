@@ -474,6 +474,16 @@ button:not(:disabled):active {
   color: var(--danger);
 }
 
+.icon-action-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.icon-action-btn:disabled:hover {
+  color: var(--text-muted);
+  background: none;
+}
+
 .file-list {
   list-style: none;
   padding-left: 16px;
@@ -2623,7 +2633,10 @@ option.option-network {
   width: min(300px, 90vw);
   display: flex;
   flex-direction: column;
-  max-height: calc(100vh - 40px);
+  /* Tooltip.jsx sets --tooltip-max-height so the panel expands downward from
+     a fixed top edge (and stays inside the viewport) instead of being
+     repositioned as its content grows. */
+  max-height: var(--tooltip-max-height, calc(100vh - 40px));
   transform-origin: center bottom;
   will-change: transform, opacity, width, height;
   overflow: hidden;
@@ -2634,11 +2647,7 @@ option.option-network {
   display: flex;
   flex-direction: column;
   height: auto;
-  max-height: calc(100vh - 40px);
-}
-
-.ai-tooltip.wide .tooltip-inner-measure {
-  max-height: calc(100vh - 40px);
+  max-height: var(--tooltip-max-height, calc(100vh - 40px));
 }
 
 @keyframes tooltipIntro {
@@ -2666,9 +2675,42 @@ option.option-network {
   pointer-events: none;
 }
 
+/* A result panel is sized to its content: the inner box lays out at
+   max-content (capped at 450px, where text starts wrapping) and Tooltip.jsx
+   copies the measured width onto the panel so the transition still animates.
+   Without this a one-word translation got the full 450px banner. */
 .ai-tooltip.wide {
-  width: min(450px, 95vw);
-  max-height: calc(100vh - 40px);
+  --tooltip-max-width: min(450px, 95vw);
+  --tooltip-min-width: 200px;
+  width: max-content;
+  max-width: var(--tooltip-max-width);
+  min-width: var(--tooltip-min-width);
+}
+
+/* The panel is border-box with a 1px border, so the inner box is capped 2px
+   short of the panel's own cap; Tooltip.jsx adds those 2px back when it copies
+   the measured width onto the panel. */
+.ai-tooltip.wide .tooltip-inner-measure {
+  width: max-content;
+  max-width: calc(var(--tooltip-max-width) - 2px);
+  min-width: calc(var(--tooltip-min-width) - 2px);
+}
+
+/* A streaming answer stays at the full width: content-sizing it per token
+   would re-wrap the text (and nudge the panel) on every frame. It settles to
+   its content width once the answer is complete. */
+.ai-tooltip.wide.is-streaming,
+.ai-tooltip.wide.is-streaming .tooltip-inner-measure {
+  width: var(--tooltip-max-width);
+  max-width: var(--tooltip-max-width);
+}
+
+/* min-height == max-height while streaming: the panel actually occupies the
+   box it was positioned for, so its bottom edge sits right above the selection
+   from the first token instead of creeping toward it. */
+.ai-tooltip.wide.is-streaming .tooltip-inner-measure {
+  width: calc(var(--tooltip-max-width) - 2px);
+  min-height: calc(var(--tooltip-max-height) - 2px);
 }
 
 .ai-tooltip.loading-state {
@@ -2787,6 +2829,26 @@ option.option-network {
 
 .tts-spin {
   animation: spin 1s linear infinite;
+}
+
+/* Streaming answer: a blinking caret after the last rendered token, so a
+   partial answer doesn't read as a finished (truncated) one. */
+.explanation-text.is-streaming > *:last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: var(--accent);
+  opacity: 0.75;
+  animation: streamCaretBlink 1s steps(2, start) infinite;
+}
+
+@keyframes streamCaretBlink {
+  to {
+    visibility: hidden;
+  }
 }
 
 .tooltip-tts-error {

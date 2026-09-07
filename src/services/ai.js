@@ -648,6 +648,15 @@ function buildExplanationPrompt(text, { contextMarkdown = '', pdfName = '' } = {
     ].filter(Boolean).join('\n');
 }
 
+/**
+ * Explains `text`, optionally streaming the answer as it arrives.
+ *
+ * @param {string} text
+ * @param {{contextMarkdown?: string, pdfName?: string, onDelta?: (delta: string, full: string) => void}} [options]
+ *   `onDelta` receives each token plus the text so far, so the tooltip can
+ *   render a partial answer instead of spinning until the whole reply lands.
+ *   A cache hit answers instantly and never calls it.
+ */
 export async function explainText(text, options = {}) {
     const contextMarkdown = (options.contextMarkdown || '').trim();
     const cacheKey = contextMarkdown
@@ -671,7 +680,9 @@ export async function explainText(text, options = {}) {
         contextMarkdown,
         pdfName: options.pdfName || ''
     });
-    const result = await chatAi([{ role: 'user', content: prompt }], 'explain');
+    const result = await chatAi([{ role: 'user', content: prompt }], 'explain', {
+        onDelta: options.onDelta,
+    });
 
     explanationCache.set(cacheKey, result);
     if (!contextMarkdown) {
@@ -681,13 +692,20 @@ export async function explainText(text, options = {}) {
     return result;
 }
 
-export async function translateText(text, targetLanguage = '日本語') {
+/**
+ * @param {string} text
+ * @param {string} [targetLanguage]
+ * @param {{onDelta?: (delta: string, full: string) => void}} [options] see explainText
+ */
+export async function translateText(text, targetLanguage = '日本語', options = {}) {
     const prompt = [
         `Translate into ${targetLanguage}. Output only the translation.`,
         '',
         text
     ].join('\n');
-    return await chatAi(buildTranslationMessages(prompt, targetLanguage), 'translate');
+    return await chatAi(buildTranslationMessages(prompt, targetLanguage), 'translate', {
+        onDelta: options.onDelta,
+    });
 }
 
 const OCR_SUMMARY_MAX_CHARS = 12000;
