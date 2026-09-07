@@ -4,6 +4,9 @@ import { chatAi } from '../services/ai';
 import { renderMarkdown } from '../utils/markdown';
 import { loadChatMessages, saveChatMessages, clearChatMessages } from '../services/storage';
 
+/** How close to the bottom still counts as "following the stream". */
+const STICK_THRESHOLD_PX = 32;
+
 const MessageItem = ({ m }) => {
     const [copied, setCopied] = useState(false);
 
@@ -46,9 +49,11 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, oc
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const scrollRef = useRef(null);
+    const stickToBottomRef = useRef(true);
 
     useEffect(() => {
         let cancelled = false;
+        stickToBottomRef.current = true;
         if (currentPdfName) {
             loadChatMessages(currentPdfName).then((saved) => {
                 if (!cancelled) setMessages(saved);
@@ -61,7 +66,17 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, oc
         };
     }, [currentPdfName]);
 
+    // Auto-scroll follows the stream only while the view is parked at the
+    // bottom. Scrolling up to re-read something detaches it until the user
+    // comes back down (or sends the next message).
+    const handleScroll = () => {
+        const el = scrollRef.current;
+        if (!el) return;
+        stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_THRESHOLD_PX;
+    };
+
     useEffect(() => {
+        if (!stickToBottomRef.current) return;
         if (scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
@@ -70,6 +85,9 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, oc
     const handleSend = async (e) => {
         e?.preventDefault();
         if (!input.trim() || isLoading) return;
+
+        // Sending is an explicit "show me what comes next" gesture.
+        stickToBottomRef.current = true;
 
         const userMsg = { role: 'user', content: input };
         const newMessages = [...messages, userMsg];
@@ -137,7 +155,7 @@ export default function Chat({ lastExplainedText, currentPdfName, pdfContent, oc
                 </button>
             </div>
 
-            <div className="chat-messages" ref={scrollRef}>
+            <div className="chat-messages" ref={scrollRef} onScroll={handleScroll}>
                 {messages.length === 0 && (
                     <div className="chat-welcome">
                         <Bot size={32} />
