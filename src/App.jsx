@@ -141,6 +141,9 @@ export function App() {
   const [lastHoverText, setLastHoverText] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [isTooltipVisible, setIsTooltipVisible] = useState(false);
+  // True while an explanation/translation is still being streamed in, so the
+  // tooltip can show the partial answer with a "生成中" hint instead of a spinner.
+  const [isTooltipStreaming, setIsTooltipStreaming] = useState(false);
   const [lastLang, setLastLang] = useState(localStorage.getItem('mist_last_lang') || '日本語');
 
   const [pdfs, setPdfs] = useState([]);
@@ -296,7 +299,7 @@ export function App() {
       setCustomFolders(nextState.customFolders);
       scheduleDriveExport();
 
-      // 繝舌ャ繧ｯ繧ｰ繝ｩ繧ｦ繝ｳ繝峨〒蜈ｨPDF繧恥refetch・・on-blocking縲・㍾隍・せ繧ｭ繝・・・・
+      // バックグラウンドで全PDFをprefetch（non-blocking、重複スキップ）
       const filesToFetch = nextState.files ?? [];
       if (filesToFetch.length > 0) {
         const signature = filesToFetch.map(f => f.cid).join(',');
@@ -969,40 +972,97 @@ export function App() {
     return () => unsubscribe();
   }, []);
 
+  // Tokens arrive far faster than the tooltip needs to repaint (every render
+  // re-parses the partial markdown), so streamed text is flushed once per
+  // animation frame rather than once per token.
+  const streamFrameRef = useRef(0);
+  const streamPendingRef = useRef(null);
+  // Bumped whenever the tooltip target changes (new selection / close) so a
+  // still-running stream can't paint into the tooltip the user moved on from.
+  const streamGenerationRef = useRef(0);
+
+  const cancelTooltipStream = useCallback(() => {
+    streamGenerationRef.current += 1;
+    if (streamFrameRef.current) {
+      cancelAnimationFrame(streamFrameRef.current);
+      streamFrameRef.current = 0;
+    }
+    streamPendingRef.current = null;
+    setIsTooltipStreaming(false);
+  }, []);
+
   const handleHoverText = useCallback((text, pos) => {
-    // A new selection supersedes whatever was being read out.
+    // A new selection supersedes whatever was being read out — and whatever
+    // was still streaming into the tooltip for the previous one.
     tts.stop();
+    cancelTooltipStream();
     setTooltipPos(pos);
     setTooltipText(null);
     setLastHoverText(text);
     setIsTooltipVisible(true);
-  }, [tts.stop]);
+  }, [cancelTooltipStream, tts.stop]);
+
+  const pushStreamedTooltipText = useCallback((full) => {
+    // Stay on the "処理中..." panel until there is something to show, so a
+    // leading empty/whitespace token doesn't flash an empty result box.
+    streamPendingRef.current = full.trim() ? full : 'loading';
+    if (streamFrameRef.current) return;
+    streamFrameRef.current = requestAnimationFrame(() => {
+      streamFrameRef.current = 0;
+      if (streamPendingRef.current === null) return;
+      setTooltipText(streamPendingRef.current);
+      streamPendingRef.current = null;
+    });
+  }, []);
+
+  const endTooltipStream = useCallback((finalText) => {
+    if (streamFrameRef.current) {
+      cancelAnimationFrame(streamFrameRef.current);
+      streamFrameRef.current = 0;
+    }
+    streamPendingRef.current = null;
+    setIsTooltipStreaming(false);
+    setTooltipText(finalText);
+  }, []);
 
   const handleRequestExplanation = async () => {
     if (!lastHoverText) return;
+    cancelTooltipStream();
+    const generation = streamGenerationRef.current;
     setTooltipText('loading');
+    setIsTooltipStreaming(true);
     try {
       const contextMarkdown = ocrMarkdown || await getOcrMarkdown(currentPdfName) || '';
       const explanation = await explainText(lastHoverText, {
         contextMarkdown,
         pdfName: currentPdfName || '',
+        onDelta: (_delta, full) => {
+          if (generation === streamGenerationRef.current) pushStreamedTooltipText(full);
+        },
       });
-      setTooltipText(explanation);
+      if (generation === streamGenerationRef.current) endTooltipStream(explanation);
     } catch (err) {
-      setTooltipText('繧ｨ繝ｩ繝ｼ: ' + err.message);
+      if (generation === streamGenerationRef.current) endTooltipStream('エラー: ' + err.message);
     }
   };
 
   const handleRequestTranslation = async (lang) => {
     if (!lastHoverText) return;
+    cancelTooltipStream();
+    const generation = streamGenerationRef.current;
     setTooltipText('loading');
+    setIsTooltipStreaming(true);
     setLastLang(lang);
     localStorage.setItem('mist_last_lang', lang);
     try {
-      const translation = await translateText(lastHoverText, lang);
-      setTooltipText(translation);
+      const translation = await translateText(lastHoverText, lang, {
+        onDelta: (_delta, full) => {
+          if (generation === streamGenerationRef.current) pushStreamedTooltipText(full);
+        },
+      });
+      if (generation === streamGenerationRef.current) endTooltipStream(translation);
     } catch (err) {
-      setTooltipText('繧ｨ繝ｩ繝ｼ: ' + err.message);
+      if (generation === streamGenerationRef.current) endTooltipStream('エラー: ' + err.message);
     }
   };
 
@@ -1110,6 +1170,7 @@ export function App() {
 
   const closeTooltip = () => {
     tts.stop();
+    cancelTooltipStream();
     setIsTooltipVisible(false);
   };
 
@@ -1167,7 +1228,7 @@ export function App() {
                 setIsPdfMasking(false);
               }, 600);
             }}
-            title="繧ｵ繧､繝峨ヰ繝ｼ繧貞・譖ｿ"
+            title="サイドバーを切替"
           >
             {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeftOpen size={18} />}
           </button>
@@ -1187,7 +1248,7 @@ export function App() {
                   autoFocus
                 />
               ) : (
-                <div className="file-name-display" onClick={() => { setIsRenaming(true); setRenameValue(currentPdfName); }} title="繧ｯ繝ｪ繝・け縺励※蜷榊燕繧貞､画峩">
+                <div className="file-name-display" onClick={() => { setIsRenaming(true); setRenameValue(currentPdfName); }} title="クリックして名前を変更">
                   <span className="editable-name">{currentPdfName}</span>
                 </div>
               )
@@ -1311,6 +1372,7 @@ export function App() {
           currentTerm={lastHoverText}
           position={tooltipPos}
           isVisible={isTooltipVisible}
+          isStreaming={isTooltipStreaming}
           onClose={closeTooltip}
           onRequestExplanation={handleRequestExplanation}
           onRequestTranslation={handleRequestTranslation}
@@ -1405,8 +1467,8 @@ export function App() {
         <div className={`prefetch-toast ${prefetchProgress.complete ? 'complete' : ''}`}>
           <RefreshCw size={13} className={prefetchProgress.complete ? '' : 'spinning'} />
           {prefetchProgress.complete
-            ? `PDF蜷梧悄螳御ｺ・(${prefetchProgress.total}莉ｶ)`
-            : `PDF繧貞酔譛滉ｸｭ ${prefetchProgress.done}/${prefetchProgress.total}`}
+            ? `PDF同期完了 (${prefetchProgress.total}件)`
+            : `PDFを同期中 ${prefetchProgress.done}/${prefetchProgress.total}`}
         </div>
       )}
 
