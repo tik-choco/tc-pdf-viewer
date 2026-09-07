@@ -2722,6 +2722,48 @@ option.option-network {
   opacity: 0.95;
 }
 
+/* Hand-resized result panel: the box the user dragged out wins over the
+   content-fit sizing above (and over the streaming box), and the answer
+   scrolls inside it. Tooltip.jsx puts the pixel width/height on the panel. */
+.ai-tooltip.is-resized {
+  max-width: none;
+  min-width: 0;
+}
+
+.ai-tooltip.is-resized .tooltip-inner-measure,
+.ai-tooltip.wide.is-resized .tooltip-inner-measure,
+.ai-tooltip.wide.is-streaming.is-resized .tooltip-inner-measure {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 100%;
+  max-height: none;
+  min-height: 0;
+}
+
+.ai-tooltip.is-resizing {
+  user-select: none;
+}
+
+/* Corner grip: two short diagonal strokes, the usual resize affordance. */
+.tooltip-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  opacity: 0.55;
+  z-index: 1;
+  background:
+    linear-gradient(135deg, transparent 0 45%, var(--text-muted) 45% 55%, transparent 55%) no-repeat 3px 3px / 11px 11px,
+    linear-gradient(135deg, transparent 0 45%, var(--text-muted) 45% 55%, transparent 55%) no-repeat 7px 7px / 7px 7px;
+}
+
+.tooltip-resize-handle:hover {
+  opacity: 1;
+}
+
 .tooltip-header {
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);

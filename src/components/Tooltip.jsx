@@ -11,6 +11,9 @@ import { renderMarkdown } from '../utils/markdown';
  */
 const STREAM_RESERVE_PX = 260;
 
+/** Smallest box a hand-resize may drag the result panel down to. */
+const MIN_SIZE = { w: 220, h: 140 };
+
 /**
  * Speech input for an AI result: the rendered markdown's text content, so
  * headings/list bullets/code fences aren't read out as literal punctuation.
@@ -42,6 +45,12 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
   // How tall the panel may grow once the answer is complete: the room between
   // its (fixed) top edge and the bottom of the viewport.
   const [availableHeight, setAvailableHeight] = useState(null);
+  // A hand-dragged size, once the user has resized the panel: from then on it
+  // keeps that exact box (the content-fit sizing above stops applying) until
+  // the tooltip is opened on another selection, or the grip is double-clicked.
+  const [userSize, setUserSize] = useState(null);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartRef = useRef(null);
   const measureRef = useRef(null);
   const scrollAreaRef = useRef(null);
   const placementLockedRef = useRef(false);
@@ -70,6 +79,7 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
     if (isVisible) {
       setDragOffset({ x: 0, y: 0 });
       setHasDragged(false);
+      setUserSize(null);
     }
   }, [isVisible, currentTerm]);
 
@@ -145,6 +155,44 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
     setIsDragging(true);
   };
 
+  useEffect(() => {
+    if (!isResizing) return;
+    const handleMouseMove = (e) => {
+      const start = resizeStartRef.current;
+      if (!start) return;
+      // Clamped to the room right of / below the panel's own top-left corner,
+      // so a resize can't push the panel off screen.
+      const maxW = Math.max(MIN_SIZE.w, window.innerWidth - start.left - 10);
+      const maxH = Math.max(MIN_SIZE.h, window.innerHeight - start.top - 10);
+      setUserSize({
+        w: Math.min(maxW, Math.max(MIN_SIZE.w, start.w + (e.clientX - start.x))),
+        h: Math.min(maxH, Math.max(MIN_SIZE.h, start.h + (e.clientY - start.y)))
+      });
+    };
+    const handleMouseUp = () => setIsResizing(false);
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
+  const handleResizeStart = (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const rect = tooltipRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    resizeStartRef.current = {
+      x: e.clientX, y: e.clientY,
+      w: rect.width, h: rect.height,
+      left: rect.left, top: rect.top
+    };
+    setUserSize({ w: rect.width, h: rect.height });
+    setIsResizing(true);
+  };
+
   const handleCopy = async () => {
     if (!text) return;
     try {
@@ -213,7 +261,7 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
   return (
     <div
       ref={tooltipRef}
-      className={`ai-tooltip ${isResult ? 'wide' : ''} ${isStreamingResult ? 'is-streaming' : ''} ${text === 'loading' ? 'loading-state' : ''} ${showLangs ? 'langs-open' : ''} ${isDragging ? 'is-dragging' : ''} ${isActuallyVisible ? 'active' : ''}`}
+      className={`ai-tooltip ${isResult ? 'wide' : ''} ${isStreamingResult ? 'is-streaming' : ''} ${text === 'loading' ? 'loading-state' : ''} ${showLangs ? 'langs-open' : ''} ${userSize ? 'is-resized' : ''} ${isResizing ? 'is-resizing' : ''} ${isDragging ? 'is-dragging' : ''} ${isActuallyVisible ? 'active' : ''}`}
       style={{
         left: position.x + offset.x + dragOffset.x,
         top: position.y + offset.y + dragOffset.y,
@@ -223,17 +271,26 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
         // full 450px so the text doesn't re-wrap on every token. +2px covers
         // the panel's own border (everything here is border-box), so the
         // measured inner box isn't clipped by the width taken from it.
-        width: isResult && !isStreamingResult && measuredWidth ? `${Math.ceil(measuredWidth) + 2}px` : undefined,
+        // A hand-resized panel keeps exactly the box the user dragged out; the
+        // content caps stop applying and the answer scrolls inside it.
+        width: userSize
+          ? `${userSize.w}px`
+          : isResult && !isStreamingResult && measuredWidth ? `${Math.ceil(measuredWidth) + 2}px` : undefined,
+        maxWidth: userSize ? 'none' : undefined,
         // Caps the panel while streaming (the reserved box) and lets it use
         // the room below its fixed top edge once the answer is complete.
-        '--tooltip-max-height': isStreamingResult
+        '--tooltip-max-height': userSize
+          ? `${userSize.h}px`
+          : isStreamingResult
           ? `${streamReservePx()}px`
           : availableHeight
             ? `${availableHeight}px`
             : undefined,
-        height: measuredHeight && isActuallyVisible ? `${measuredHeight}px` : 'auto',
+        height: userSize
+          ? `${userSize.h}px`
+          : measuredHeight && isActuallyVisible ? `${measuredHeight}px` : 'auto',
         transform: `translateY(${isActuallyVisible ? 0 : 10}px) scale(${isActuallyVisible ? 1 : 0.95})`,
-        transition: isDragging ? 'none' : `
+        transition: isDragging || isResizing ? 'none' : `
           opacity 0.3s ${smoothEasing},
           transform 0.4s ${smoothEasing},
           width 0.3s ${smoothEasing},
@@ -336,6 +393,15 @@ export default function Tooltip({ text, currentTerm, position, isVisible, isStre
           {ttsError && <div className="tooltip-tts-error">{ttsError}</div>}
         </div>
       </div>
+
+      {isResult && (
+        <div
+          className="tooltip-resize-handle"
+          onMouseDown={handleResizeStart}
+          onDblClick={() => setUserSize(null)}
+          title="ドラッグでサイズ変更 / ダブルクリックで自動サイズに戻す"
+        />
+      )}
     </div>
   );
 }
