@@ -1,3 +1,4 @@
+import { MistBuildBanner } from "../MistBuildBanner.jsx";
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { Play, Plus, Sparkles, Volume2, X } from 'lucide-preact';
 import {
@@ -1536,6 +1537,7 @@ export function SettingsPanel() {
                 {activeTab === 'network' && renderNetworkTab()}
                 {activeTab === 'tasks' && renderTasksTab()}
             </div>
+            <footer style={{ padding: "12px 0" }}><MistBuildBanner view="settings" /></footer>
         </div>
     );
 }

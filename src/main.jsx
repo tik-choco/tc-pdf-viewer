@@ -1,3 +1,4 @@
+import { MistBuildBanner } from "./components/MistBuildBanner.jsx";
 import { render } from 'preact';
 import { App } from './App.jsx';
 import 'katex/dist/katex.min.css';
@@ -13,7 +14,7 @@ if ('serviceWorker' in navigator && !import.meta.env.DEV) {
     });
 }
 
-render(<App />, document.getElementById('app'));
+render(<div class="mist-app-frame"><MistBuildBanner /><div class="mist-app-content"><App /></div></div>, document.getElementById('app'));
 
 writeAppManifest({
     app: 'tc-pdf-viewer',
