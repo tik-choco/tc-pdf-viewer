@@ -1,3 +1,4 @@
+import { captureMistBuildInfo, markMistLoadError } from "../lib/mistBuildInfo.js";
 import { MistNode } from '../lib/mistlib/index.js';
 import { readDeviceId } from './device.js';
 import { mistSignalingConfig } from '../services/mistSignaling.js';
@@ -53,7 +54,13 @@ export async function getMistNode() {
   if (!_initPromise) {
     _initPromise = sysNode.init();
   }
-  await _initPromise;
+  try {
+    await _initPromise;
+  } catch (error) {
+    markMistLoadError();
+    throw error;
+  }
+  captureMistBuildInfo();
   if (!_dispatcherInstalled) {
     _dispatcherInstalled = true;
     sysNode.onEvent((eventType, fromId, payload) => {

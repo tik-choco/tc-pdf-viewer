@@ -26,6 +26,7 @@ export default defineConfig(({ mode }) => {
   return {
     base: process.env.VITE_BASE_PATH || '/tc-pdf-viewer/',
     resolve: { alias },
+    define: { __MISTLIB_SOURCE__: JSON.stringify(localEngine ? 'local' : 'registry') },
     server: {
       fs: {
         // MISTLIB_LOCAL points outside this app's root (a sibling mistlib-dev
