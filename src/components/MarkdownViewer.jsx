@@ -1,9 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { Check, Columns2, Copy, Download, Edit3, Eye, FileText, Languages, RefreshCw, Save, Type, ZoomIn, ZoomOut } from 'lucide-preact';
 import { renderMarkdown } from '../utils/markdown';
+import { getSourceFreshness } from '../utils/sourceFreshness';
+
+function SourceBadge({ entry, currentPdfCid, label }) {
+    const freshness = getSourceFreshness(entry, currentPdfCid);
+    if (!freshness) return null;
+    const message = freshness === 'stale'
+        ? `${label}の元PDFと現在のPDFが異なります。OCRを再実行し、必要に応じて翻訳を再生成してください。`
+        : `${label}時のPDF情報が保存されていないため、現在のPDFと比較できません。`;
+    return <span className={`source-freshness ${freshness}`} title={message} aria-label={message}>
+        {freshness === 'stale' ? 'PDF更新あり' : '比較情報なし'}
+    </span>;
+}
 
 export default function MarkdownViewer({
     fileName,
+    currentPdfCid,
+    ocrSource,
+    translationSources,
     markdown,
     onChange,
     status,
@@ -166,6 +181,7 @@ export default function MarkdownViewer({
                         {isTranslating ? <RefreshCw size={15} className="spinning" /> : <Languages size={15} />}
                         Translate
                     </button>
+                    <SourceBadge entry={translationSources?.[selectedLanguage]} currentPdfCid={currentPdfCid} label="翻訳" />
                     <button
                         className="toolbar-btn"
                         onClick={handleRegenerateTranslation}
@@ -175,9 +191,11 @@ export default function MarkdownViewer({
                         <RefreshCw size={15} />
                     </button>
 
-                    <button className="toolbar-btn" onClick={onRunOcr} disabled={!hasPdf || busy} title="Re-run OCR">
+                    <button className="toolbar-text-btn" onClick={onRunOcr} disabled={!hasPdf || busy} title="Re-run OCR">
                         <RefreshCw size={15} className={isRunning ? 'spinning' : ''} />
+                        OCR
                     </button>
+                    <SourceBadge entry={ocrSource} currentPdfCid={currentPdfCid} label="OCR" />
                     <button className="toolbar-btn" onClick={onSave} disabled={!markdown || busy} title="Save">
                         <Save size={15} />
                     </button>

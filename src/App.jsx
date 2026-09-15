@@ -448,13 +448,14 @@ export function App() {
       total: null,
     });
 
+    const sourcePdfCid = getPdfFileCid(job.pdfName);
     const data = await loadPdf(job.pdfName);
     throwIfCancelled(signal);
 
     const pageCount = await getPdfPageCount(data, { signal });
     throwIfCancelled(signal);
 
-    const sig = `${getPdfFileCid(job.pdfName) || 'na'}:${pageCount}`;
+    const sig = `${sourcePdfCid || 'na'}:${pageCount}`;
     const key = ocrCheckpointKey(job.pdfName);
     const restored = await loadJobCheckpointUnits(key, { sig, total: pageCount });
 
@@ -555,7 +556,7 @@ export function App() {
     }
 
     const finalMarkdown = pageMarkdown.join('\n\n');
-    await saveOcrMarkdown(job.pdfName, finalMarkdown);
+    await saveOcrMarkdown(job.pdfName, finalMarkdown, { sourcePdfCid });
     setOcrMarkdownIndex(getOcrMarkdownIndexSnapshot());
     window.dispatchEvent(new CustomEvent('sync-data-updated'));
     clearJobCheckpoint(key);
@@ -622,7 +623,7 @@ export function App() {
     });
     throwIfCancelled(signal);
 
-    await saveTranslatedMarkdown(job.pdfName, language, translated);
+    await saveTranslatedMarkdown(job.pdfName, language, translated, { sourcePdfCid: job.sourcePdfCid });
     setTranslatedMarkdownIndex(getTranslatedMarkdownIndexSnapshot());
     window.dispatchEvent(new CustomEvent('sync-data-updated'));
     clearJobCheckpoint(key);
@@ -1142,6 +1143,7 @@ export function App() {
         pdfName: currentPdfName,
         language: targetLanguage,
         markdown: ocrMarkdown,
+        sourcePdfCid: ocrMarkdownIndex[currentPdfName]?.sourcePdfCid || null,
       });
     } catch (err) {
       setMarkdownTranslateError(err.message || String(err));
@@ -1318,6 +1320,9 @@ export function App() {
                 <PdfViewer
                   pdfData={pdfData}
                   fileName={currentPdfName}
+                  currentPdfCid={pdfs.find(file => file.name === currentPdfName)?.cid}
+                  ocrSource={ocrMarkdownIndex[currentPdfName]}
+                  translationSources={translatedMarkdownIndex[currentPdfName]}
                   onHoverText={handleHoverText}
                   currentHoverText={tooltipText}
                 />
