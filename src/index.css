@@ -3927,3 +3927,21 @@ option.option-network {
 .mist-app-frame { display: flex; flex-direction: column; height: 100dvh; min-height: 0; }
 .mist-app-content { flex: 1; min-height: 0; }
 .mist-app-content > .app-container { height: 100%; }
+.source-freshness {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 7px;
+    border: 1px solid currentColor;
+    border-radius: 5px;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.source-freshness.stale {
+    color: #b45309;
+    background: #fef3c7;
+}
+
+.source-freshness.unknown {
+    color: var(--text-secondary);
+}

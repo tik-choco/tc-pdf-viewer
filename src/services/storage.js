@@ -221,7 +221,7 @@ export async function getExplanation(text) {
     }
 }
 
-export async function saveOcrMarkdown(pdfName, markdown) {
+export async function saveOcrMarkdown(pdfName, markdown, source = {}) {
     if (!pdfName) throw new Error('PDF name is required to save OCR Markdown.');
 
     await initMist();
@@ -231,6 +231,7 @@ export async function saveOcrMarkdown(pdfName, markdown) {
     index[pdfName] = {
         ...(typeof index[pdfName] === 'object' ? index[pdfName] : {}),
         cid,
+        ...source,
         content: undefined, // new writes are CID-only; JSON.stringify drops undefined
         updatedAt: Date.now(),
     };
@@ -283,7 +284,7 @@ export function getOcrMarkdownIndexSnapshot() {
     return getOcrMarkdownIndex();
 }
 
-export async function saveTranslatedMarkdown(pdfName, targetLanguage, markdown) {
+export async function saveTranslatedMarkdown(pdfName, targetLanguage, markdown, source = {}) {
     if (!pdfName) throw new Error('PDF name is required to save translated Markdown.');
     if (!targetLanguage) throw new Error('Target language is required to save translated Markdown.');
 
@@ -295,6 +296,7 @@ export async function saveTranslatedMarkdown(pdfName, targetLanguage, markdown) 
         ...(index[pdfName] || {}),
         [targetLanguage]: {
             cid,
+            ...source,
             content: undefined, // new writes are CID-only; JSON.stringify drops undefined
             updatedAt: Date.now(),
         },
