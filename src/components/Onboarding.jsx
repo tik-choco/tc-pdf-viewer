@@ -1,7 +1,6 @@
 import { useState } from 'preact/hooks';
 import {
     Sparkles,
-    Cpu,
     FileText,
     Check,
     ArrowLeft,
@@ -14,15 +13,7 @@ import {
     RefreshCw,
     Sun,
 } from 'lucide-preact';
-import {
-    getAiSettings,
-    saveAiSettings,
-    testAiConnection,
-    addLlmProvider,
-    addLlmPreset,
-    setDefaultLlmPresetIdIfEmpty,
-    resolveUpstreamProviderTarget,
-} from '../services/ai';
+import { SettingsPanel } from './sidebar/SettingsPanel';
 
 const STEP_COUNT = 4;
 
@@ -93,121 +84,10 @@ function OnboardingDots({ step }) {
     );
 }
 
-function AiSetupStep({ aiForm, setAiForm }) {
-    const [testState, setTestState] = useState('idle'); // idle | busy | ok | error
-    const [testError, setTestError] = useState('');
-
-    const handleTestConnection = async () => {
-        setTestState('busy');
-        setTestError('');
-        try {
-            await testAiConnection({ baseUrl: aiForm.baseUrl, apiKey: aiForm.apiKey });
-            setTestState('ok');
-        } catch (err) {
-            setTestState('error');
-            setTestError(err?.message || String(err));
-        }
-    };
-
-    return (
-        <>
-            <div className="ob-step-head">
-                <Cpu size={24} />
-                <h2 className="ob-title">AI接続設定</h2>
-            </div>
-            <div className="ob-body">
-            <p>
-                OCR・翻訳・チャットに使う LLM を設定します。OpenAI 互換の API が使えます（OpenAI、LM Studio、Ollama など）。
-            </p>
-            <div className="ob-field">
-                <label className="ob-label" htmlFor="ob-base-url">ベースURL</label>
-                <input
-                    id="ob-base-url"
-                    className="ob-input"
-                    value={aiForm.baseUrl}
-                    onInput={(event) => setAiForm({ ...aiForm, baseUrl: event.target.value })}
-                    placeholder="https://api.openai.com/v1"
-                    autoComplete="off"
-                />
-            </div>
-            <div className="ob-field">
-                <label className="ob-label" htmlFor="ob-api-key">APIキー（不要なら空欄）</label>
-                <input
-                    id="ob-api-key"
-                    className="ob-input"
-                    type="password"
-                    value={aiForm.apiKey}
-                    onInput={(event) => setAiForm({ ...aiForm, apiKey: event.target.value })}
-                    placeholder="sk-..."
-                    autoComplete="off"
-                />
-            </div>
-            <div className="ob-field">
-                <label className="ob-label" htmlFor="ob-model">モデル</label>
-                <input
-                    id="ob-model"
-                    className="ob-input"
-                    value={aiForm.model}
-                    onInput={(event) => setAiForm({ ...aiForm, model: event.target.value })}
-                    placeholder="gpt-4o-mini"
-                    autoComplete="off"
-                />
-            </div>
-            <div className="ob-test-row">
-                <button type="button" className="ob-btn" onClick={handleTestConnection} disabled={testState === 'busy'}>
-                    <RefreshCw size={14} className={testState === 'busy' ? 'spinning' : ''} />
-                    接続テスト
-                </button>
-                {testState === 'ok' && <span className="ob-test-ok">接続できました！</span>}
-                {testState === 'error' && <span className="ob-error">接続に失敗しました: {testError}</span>}
-            </div>
-            </div>
-        </>
-    );
-}
-
 export function Onboarding({ onClose }) {
     const [step, setStep] = useState(0);
-    const [aiForm, setAiForm] = useState(() => {
-        // 共有LLM設定にすでに何か入っていれば(他アプリ経由でも)それをプリフィルする。
-        const target = resolveUpstreamProviderTarget();
-        return {
-            baseUrl: target?.baseUrl || '',
-            apiKey: target?.apiKey || '',
-            model: target?.model || '',
-        };
-    });
-
     const goNext = () => setStep((s) => Math.min(s + 1, STEP_COUNT - 1));
     const goBack = () => setStep((s) => Math.max(s - 1, 0));
-
-    const handleSaveAiSettings = () => {
-        const baseUrl = (aiForm.baseUrl || '').trim().replace(/\/$/, '');
-        const apiKey = aiForm.apiKey || '';
-        const model = (aiForm.model || '').trim();
-
-        if (baseUrl && model) {
-            // 共有LLM設定(tc-shared-llm-config-v1)へプロバイダ/プリセットを追加し、
-            // このアプリの全タスクにそのプリセットを割り当てる(初回セットアップなので
-            // タスクごとの使い分けまでは求めない、簡易設定)。
-            const providerId = addLlmProvider({ label: baseUrl, baseUrl, apiKey });
-            const presetId = addLlmPreset({ label: model, providerId, model });
-            setDefaultLlmPresetIdIfEmpty(presetId);
-
-            const current = getAiSettings();
-            saveAiSettings({
-                ...current,
-                taskPresetIds: {
-                    explain: presetId,
-                    translate: presetId,
-                    chat: presetId,
-                    ocr: presetId,
-                },
-            });
-        }
-
-        goNext();
-    };
 
     return (
         <div className="ob-overlay">
@@ -229,7 +109,7 @@ export function Onboarding({ onClose }) {
                     </div>
                 )}
 
-                {step === 1 && <AiSetupStep aiForm={aiForm} setAiForm={setAiForm} />}
+                {step === 1 && <div className="ob-body"><SettingsPanel showGuide={false} /></div>}
 
                 {step === 2 && (
                     <>
@@ -272,7 +152,7 @@ export function Onboarding({ onClose }) {
                             </button>
                         )}
                         {step === 1 && (
-                            <button type="button" className="ob-btn ob-btn-accent" onClick={handleSaveAiSettings}>
+                            <button type="button" className="ob-btn ob-btn-accent" onClick={goNext}>
                                 保存して次へ
                                 <ArrowRight size={16} />
                             </button>

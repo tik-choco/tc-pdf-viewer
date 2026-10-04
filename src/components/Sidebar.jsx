@@ -67,7 +67,7 @@ export default function Sidebar({
                         ocrMarkdownIndex={ocrMarkdownIndex}
                     />
                 ) : (
-                    <SettingsPanel />
+                    <SettingsPanel onClose={() => setView('files')} />
                 )}
             </div>
 

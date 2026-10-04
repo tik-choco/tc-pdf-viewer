@@ -3,7 +3,7 @@
 //
 // The engine is DERIVED from the shared llm config's `tts` entry rather than
 // stored as a local app setting, exactly like tc-translate's
-// deriveVoiceEngine (see services/llmConfig.js resolveVoice):
+// deriveVoiceEngine (see @tik-choco/mistai/llm-config resolveVoice):
 //   - `tts` absent, or its `model` blank            -> 'browser' (Web Speech API)
 //   - its provider's baseUrl is `mist-network://…`  -> 'network' (a room peer synthesizes)
 //   - any other baseUrl                             -> 'api' (OpenAI-compatible /audio/speech)
@@ -15,9 +15,9 @@
 // back to the browser voice in hooks/useTts.js, and a browser without
 // speechSynthesis just reports the feature as unsupported.
 
-import { getMistllmConsumer } from './mistllm';
-import { emptyLlmConfig, loadLlmConfig, resolvePreset, resolveVoice, saveLlmConfig } from './llmConfig';
-import { isNetworkProviderBaseUrl, networkVoiceModelParam } from './networkModels';
+import { rooms } from './mistllm';
+import { getSharedLlmConfig } from './aiSettings';
+import { resolveVoice, isNetworkProviderBaseUrl, networkVoiceModelParam, roomIdFromBaseUrl } from '@tik-choco/mistai/llm-config';
 
 /** Matches mistai's MAX_TTS_TEXT_CHARS; also the cap applied on the API route so both behave alike. */
 export const MAX_TTS_TEXT_CHARS = 4000;
@@ -27,7 +27,7 @@ export const DEFAULT_TTS_VOICE = 'alloy';
 /**
  * @typedef {object} TtsSettings
  * @property {'browser'|'api'|'network'} engine
- * @property {string} providerId '' = defaultPreset の provider にフォールバック
+ * @property {string} providerId '' = defaultModel の provider にフォールバック
  * @property {string} model
  * @property {string} voice
  * @property {number|undefined} speed
@@ -39,22 +39,15 @@ export const DEFAULT_TTS_VOICE = 'alloy';
  * Derives the TTS engine from a shared llm config. See this module's header
  * for the rules; mirrors tc-translate's deriveVoiceEngine('tts').
  *
- * @param {import('./llmConfig').SharedLlmConfigV1} config
+ * @param {import('@tik-choco/mistai/llm-config').SharedLlmConfigV1} config
  * @returns {'browser'|'api'|'network'}
  */
 export function deriveTtsEngine(config) {
     const cfg = config?.tts;
     if (!cfg || !cfg.model) return 'browser';
 
-    const provider = cfg.providerId
-        ? config.providers.find((p) => p.id === cfg.providerId)
-        : (() => {
-              const defaultTarget = resolvePreset(config);
-              return defaultTarget ? config.providers.find((p) => p.id === defaultTarget.providerId) : undefined;
-          })();
-    if (!provider) return 'api';
-
-    return isNetworkProviderBaseUrl(provider.baseUrl) ? 'network' : 'api';
+    const resolved = resolveVoice(config, 'tts');
+    return resolved && isNetworkProviderBaseUrl(resolved.baseUrl) ? 'network' : 'api';
 }
 
 /**
@@ -62,58 +55,22 @@ export function deriveTtsEngine(config) {
  * an unconfigured/unresolvable config comes back as the browser engine with
  * empty connection fields.
  *
- * @param {import('./llmConfig').SharedLlmConfigV1} [config]
+ * @param {import('@tik-choco/mistai/llm-config').SharedLlmConfigV1} [config]
  * @returns {TtsSettings}
  */
-export function getTtsSettings(config = loadLlmConfig() ?? emptyLlmConfig()) {
+export function getTtsSettings(config = getSharedLlmConfig()) {
     const cfg = config.tts;
     const engine = deriveTtsEngine(config);
     const resolved = resolveVoice(config, 'tts');
     return {
         engine,
-        providerId: cfg?.providerId || '',
-        model: cfg?.model || '',
+        providerId: resolved?.providerId || cfg?.providerId || '',
+        model: resolved?.model || cfg?.model || '',
         voice: cfg?.voice || '',
         speed: cfg?.speed,
         baseUrl: resolved?.baseUrl || '',
         apiKey: resolved?.apiKey || '',
     };
-}
-
-/**
- * Merges `patch` into the shared llm config's `tts` entry and persists it.
- * Passing a blank `model` clears the entry entirely (= back to the browser
- * voice), which is what the settings UI's "ブラウザ音声" choice does.
- *
- * An omitted key means "leave as is", so clearing an optional field needs an
- * explicit non-undefined value: pass `speed: null` to drop a configured
- * speed back to the provider's default.
- *
- * @param {{providerId?: string, model?: string, voice?: string, speed?: number|null}} patch
- * @returns {TtsSettings} the settings after the write
- */
-export function updateTtsSettings(patch) {
-    const config = loadLlmConfig() ?? emptyLlmConfig();
-    const current = config.tts ?? { model: '' };
-    const next = {
-        providerId: patch.providerId !== undefined ? patch.providerId : current.providerId,
-        model: patch.model !== undefined ? patch.model : current.model,
-        voice: patch.voice !== undefined ? patch.voice : current.voice,
-        speed: patch.speed !== undefined ? patch.speed : current.speed,
-    };
-
-    if (!next.model || !next.model.trim()) {
-        delete config.tts;
-    } else {
-        const entry = { model: next.model.trim() };
-        if (next.providerId) entry.providerId = next.providerId;
-        if (next.voice) entry.voice = next.voice;
-        if (typeof next.speed === 'number' && Number.isFinite(next.speed)) entry.speed = next.speed;
-        config.tts = entry;
-    }
-
-    saveLlmConfig(config);
-    return getTtsSettings(config);
 }
 
 /** True when this browser exposes the Web Speech synthesis API. */
@@ -511,25 +468,15 @@ export async function synthesizeSpeechViaApi(params) {
 }
 
 /**
- * Requests speech synthesis from an AI Network room peer that advertised the
- * "tts" service (see MistllmConsumer.tts in ./mistllm.js). The room id comes
- * from the shared config, the same one the chat consumer joins.
+ * Requests speech synthesis in the room of the resolved voice ref.
  *
- * @param {{model: string, voice?: string, text: string}} params
+ * @param {{baseUrl: string, model: string, voice?: string, text: string}} params
  * @returns {Promise<Blob>}
  */
 export async function synthesizeSpeechViaNetwork(params) {
-    const roomId = (loadLlmConfig()?.network?.roomId || '').trim();
-    if (!roomId) throw new Error('AI NetworkのRoom IDが設定されていません。');
-
-    const consumer = getMistllmConsumer();
-    if (consumer.roomId !== roomId || consumer.status === 'idle' || consumer.status === 'error') {
-        await consumer.connect(roomId);
-    }
-
-    return await consumer.tts(params.text, {
-        // The `network-auto` sentinel means "use the provider's own default
-        // model", so it must not go out on the wire (see ./networkModels.js).
+    const roomId = roomIdFromBaseUrl(params.baseUrl);
+    return await rooms.requestRoomTts(roomId, {
+        text: params.text,
         model: networkVoiceModelParam(params.model),
         voice: (params.voice || '').trim() || undefined,
     });
@@ -551,7 +498,7 @@ export async function synthesizeSpeech(text, options = {}) {
     if (!input) throw new Error('読み上げるテキストがありません。');
 
     if (settings.engine === 'network') {
-        return await synthesizeSpeechViaNetwork({ model: settings.model, voice: settings.voice, text: input });
+        return await synthesizeSpeechViaNetwork({ baseUrl: settings.baseUrl, model: settings.model, voice: settings.voice, text: input });
     }
 
     if (settings.engine === 'api') {
