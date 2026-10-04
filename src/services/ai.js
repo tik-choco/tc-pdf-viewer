@@ -393,12 +393,22 @@ export async function chatAi(messages, task = 'chat', options = {}) {
     };
 
     try {
-        // The text-only chat wire cannot carry vision content or task effort.
-        // The mistai OpenAI tunnel carries both and buffers the room response.
         if (isNetworkProviderBaseUrl(resolved.baseUrl)) {
-            const request = rooms.requestRoomOpenAi(roomIdFromBaseUrl(resolved.baseUrl), {
+            const roomId = roomIdFromBaseUrl(resolved.baseUrl);
+            const hasImages = messages.some(message => Array.isArray(message.content)
+                && message.content.some(part => part.type === 'image_url'));
+            // Image parts still need the tunnel; text chat streams over llm_request.
+            const request = hasImages ? rooms.requestRoomOpenAi(roomId, {
                 path: '/chat/completions', method: 'POST', contentType: 'application/json',
                 body: JSON.stringify({ model: resolved.model, messages, reasoning_effort: reasoningEffort, stream: false }),
+            }) : rooms.requestRoomChat(roomId, messages.map(message => Array.isArray(message.content)
+                ? { ...message, content: message.content.map(part => part.text || '').join('\n') }
+                : message), {
+                model: resolved.model,
+                reasoningEffort,
+                onDelta: options.onDelta ? (delta, full) => {
+                    if (!controller.signal.aborted) options.onDelta(delta, full);
+                } : undefined,
             });
             let abort;
             const cancelled = new Promise((_, reject) => {
@@ -409,6 +419,7 @@ export async function chatAi(messages, task = 'chat', options = {}) {
             let response;
             try { response = await Promise.race([request, cancelled]); }
             finally { controller.signal.removeEventListener('abort', abort); }
+            if (!hasImages) return response.trim();
             const payload = JSON.parse(response.body);
             if (response.status < 200 || response.status >= 300) throw new Error(payload?.error?.message || `HTTP ${response.status}`);
             const answer = payload?.choices?.[0]?.message?.content;
