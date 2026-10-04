@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { DELIVERY_RELIABLE, EVENT_RAW } from '../lib/mistlib/index.js';
 import { readDeviceId } from '../utils/device.js';
-import { addMistEventListener, claimRoom, getMistNode, getRoomOwner, releaseRoom } from '../utils/mist.js';
+import { createSyncNode } from '../services/mistllm.js';
 
 const ROOM_QUERY_KEY = 'room';
 const ROOM_PREFIX = 'pdf-sync-';
@@ -59,7 +59,6 @@ export function useSync({
   const [hasRemoteStateDiff, setHasRemoteStateDiff] = useState(false);
 
   const nodeRef = useRef(null);
-  const unsubscribeEventsRef = useRef(null);
   const stateRef = useRef(state);
   stateRef.current = state;
   const isEditingRef = useRef(isEditing);
@@ -238,17 +237,9 @@ export function useSync({
     connectingRoomIdRef.current = '';
     setPeerCount(0);
 
-    if (unsubscribeEventsRef.current) {
-      unsubscribeEventsRef.current();
-      unsubscribeEventsRef.current = null;
-    }
-
     const currentNode = nodeRef.current;
     nodeRef.current = null;
-    if (currentNode && getRoomOwner() === 'pdf-sync') {
-      currentNode.leaveRoom();
-      releaseRoom('pdf-sync');
-    }
+    currentNode?.leaveRoom();
   }, []);
 
   const clearBroadcastTimer = useCallback(() => {
@@ -273,15 +264,12 @@ export function useSync({
     connectingRoomIdRef.current = normalizedRoomId;
 
     try {
-      const node = await getMistNode();
+      const node = createSyncNode(buildTransportRoomId(normalizedRoomId));
+      await node.init();
+      if (sessionId !== connectSessionRef.current) { node.leaveRoom(); return; }
       nodeRef.current = node;
 
-      if (sessionId !== connectSessionRef.current) return;
-
-      // mistlib supports only one room globally; fails if mistllm holds it.
-      claimRoom('pdf-sync', buildTransportRoomId(normalizedRoomId));
-
-      unsubscribeEventsRef.current = addMistEventListener((eventType, fromId, payload) => {
+      node.onEvent((eventType, fromId, payload) => {
         if (eventType === EVENT_RAW) {
           handleIncomingMessage(fromId, payload);
           return;
@@ -296,7 +284,8 @@ export function useSync({
         }
       });
 
-      node.joinRoom(buildTransportRoomId(normalizedRoomId));
+      await node.joinRoom(buildTransportRoomId(normalizedRoomId));
+      if (sessionId !== connectSessionRef.current) { node.leaveRoom(); return; }
       activeRoomIdRef.current = normalizedRoomId;
       setStatus('connected');
       setPeerCount(readPeerCount(node, deviceId));
@@ -335,7 +324,7 @@ export function useSync({
   }, [connectToRoom, initialRoomId]);
 
   useEffect(() => {
-    return () => stopCurrentConnection();
+    return () => { connectSessionRef.current += 1; stopCurrentConnection(); };
   }, [stopCurrentConnection]);
 
   useEffect(() => {
@@ -398,6 +387,7 @@ export function useSync({
   }, [connectToRoom, roomId]);
 
   const disconnect = useCallback(() => {
+    connectSessionRef.current += 1;
     stopCurrentConnection();
     setStatus('idle');
   }, [stopCurrentConnection]);

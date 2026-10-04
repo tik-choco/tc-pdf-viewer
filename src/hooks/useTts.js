@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks';
-import { subscribeLlmConfig } from '../services/llmConfig';
+import { subscribeLlmConfig } from '@tik-choco/mistai/llm-config';
 import {
     SPEECH_CHUNK_CHARS,
     SPEECH_CHUNK_MIN_CHARS,

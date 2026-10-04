@@ -7,12 +7,10 @@ import Chat from './components/Chat';
 import { loadPdf, renamePdf, getPdfList as loadPdfList, prefetchPdf, saveOcrMarkdown, saveOcrMarkdownSummary, getOcrMarkdown, getOcrMarkdownIndexSnapshot, saveOcrMarkdownIndex, saveTranslatedMarkdown, getTranslatedMarkdown, getTranslatedMarkdownIndexSnapshot, saveTranslatedMarkdownIndex, migrateMarkdownIndexesToCid, getExplanationsIndex, ocrCheckpointKey, translationCheckpointKey, saveJobCheckpointUnit, loadJobCheckpointUnits, clearJobCheckpoint, computeTextSig, getPdfFileCid } from './services/storage';
 import { scheduleDriveExport } from './services/driveExport';
 import { extractText, renderPdfPagesToImages, getPdfPageCount } from './services/pdf';
-import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown, summarizeOcrMarkdown, getNetworkRoomId, splitMarkdownForTranslation } from './services/ai';
+import { explainText, translateText, translateMarkdown, getAiSettings, saveAiSettings, ocrImagesToMarkdown, summarizeOcrMarkdown, splitMarkdownForTranslation } from './services/ai';
 import { PanelLeftClose, PanelLeftOpen, MessageCircle, RefreshCw, FileText, X } from 'lucide-preact';
 import { useSync } from './hooks/useSync';
-import { useNetworkConsumerConnection } from './hooks/useNetworkConsumerConnection';
-import { useNetworkProvider } from './hooks/useNetworkProvider';
-import { useNetworkModelSync } from './hooks/useNetworkModelSync';
+import { useAiRooms } from './hooks/useAiRooms';
 import { useTts } from './hooks/useTts';
 import { SyncPanel } from './components/SyncPanel';
 import { DiffConfirmPanel } from './components/DiffConfirmPanel';
@@ -204,9 +202,6 @@ export function App() {
   }, []);
 
   const currentAiSettings = getAiSettings();
-  // Room ID now lives in the shared tc-shared-llm-config-v1 key, not in this
-  // app's local ai settings (see services/ai.js getNetworkRoomId).
-  const networkRoomId = getNetworkRoomId();
 
   const syncState = useMemo(() => ({
     files: pdfs,
@@ -219,27 +214,7 @@ export function App() {
     customFolders: customFolders
   }), [pdfs, ocrMarkdownIndex, translatedMarkdownIndex, lastLang, currentPdfName, customFolders, currentAiSettings]);
 
-  // Eagerly maintains the mistllm consumer connection (when backend === 'mistllm')
-  // and the LLM network provider role (when enabled), independent of whether
-  // SettingsPanel is currently mounted — see hooks/useNetworkConsumerConnection.js
-  // and hooks/useNetworkProvider.js.
-  useNetworkConsumerConnection({
-    backend: currentAiSettings.backend,
-    roomId: networkRoomId,
-  });
-  useNetworkProvider({
-    networkProviderEnabled: currentAiSettings.networkProviderEnabled,
-    roomId: networkRoomId,
-    networkProviderPresetIds: currentAiSettings.networkProviderPresetIds,
-  });
-  // Mirrors the connected room's advertised models into the shared llm
-  // config as ordinary presets (see hooks/useNetworkModelSync.js / spec
-  // llm-settings-common-v1.md §4.4). Also runs independent of whether
-  // SettingsPanel is mounted, same reasoning as the two hooks above.
-  useNetworkModelSync({
-    backend: currentAiSettings.backend,
-    roomId: networkRoomId,
-  });
+  useAiRooms();
 
   // Selection read-aloud (Tooltip の読み上げボタン). The engine — browser
   // voice / TTS API / AI Network — is derived from the shared llm config,
