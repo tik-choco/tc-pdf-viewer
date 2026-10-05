@@ -15,6 +15,7 @@
 // back to the browser voice in hooks/useTts.js, and a browser without
 // speechSynthesis just reports the feature as unsupported.
 
+import { isTtsSpeed, isTtsResponseFormat } from '@tik-choco/mistai';
 import { rooms } from './mistllm';
 import { getSharedLlmConfig } from './aiSettings';
 import { resolveVoice, isNetworkProviderBaseUrl, networkVoiceModelParam, roomIdFromBaseUrl } from '@tik-choco/mistai/llm-config';
@@ -67,7 +68,7 @@ export function getTtsSettings(config = getSharedLlmConfig()) {
         providerId: resolved?.providerId || cfg?.providerId || '',
         model: resolved?.model || cfg?.model || '',
         voice: cfg?.voice || '',
-        speed: cfg?.speed,
+        speed: resolved?.speed ?? cfg?.speed,
         baseUrl: resolved?.baseUrl || '',
         apiKey: resolved?.apiKey || '',
     };
@@ -433,7 +434,7 @@ function speechEndpoint(baseUrl) {
  * POSTs an OpenAI-compatible `/audio/speech` request and resolves with the
  * audio Blob. Throws an Error whose message is already user-facing Japanese.
  *
- * @param {{baseUrl: string, apiKey: string, model: string, voice?: string, speed?: number, text: string, signal?: AbortSignal}} params
+ * @param {{baseUrl: string, apiKey: string, model: string, voice?: string, speed?: number, responseFormat?: string, text: string, signal?: AbortSignal}} params
  * @returns {Promise<Blob>}
  */
 export async function synthesizeSpeechViaApi(params) {
@@ -441,9 +442,9 @@ export async function synthesizeSpeechViaApi(params) {
         model: params.model.trim(),
         input: params.text,
         voice: (params.voice || '').trim() || DEFAULT_TTS_VOICE,
-        response_format: 'mp3',
     };
-    if (typeof params.speed === 'number' && Number.isFinite(params.speed)) body.speed = params.speed;
+    if (isTtsSpeed(params.speed)) body.speed = params.speed;
+    if (isTtsResponseFormat(params.responseFormat)) body.response_format = params.responseFormat;
 
     let response;
     try {
@@ -470,7 +471,7 @@ export async function synthesizeSpeechViaApi(params) {
 /**
  * Requests speech synthesis in the room of the resolved voice ref.
  *
- * @param {{baseUrl: string, model: string, voice?: string, text: string}} params
+ * @param {{baseUrl: string, model: string, voice?: string, speed?: number, responseFormat?: string, text: string}} params
  * @returns {Promise<Blob>}
  */
 export async function synthesizeSpeechViaNetwork(params) {
@@ -479,6 +480,8 @@ export async function synthesizeSpeechViaNetwork(params) {
         text: params.text,
         model: networkVoiceModelParam(params.model),
         voice: (params.voice || '').trim() || undefined,
+        speed: params.speed,
+        responseFormat: params.responseFormat,
     });
 }
 
@@ -489,7 +492,7 @@ export async function synthesizeSpeechViaNetwork(params) {
  * resolved connection is unusable, so hooks/useTts.js can fall back.
  *
  * @param {string} text
- * @param {{settings?: TtsSettings, signal?: AbortSignal}} [options]
+ * @param {{settings?: TtsSettings, signal?: AbortSignal, speed?: number, responseFormat?: string}} [options]
  * @returns {Promise<Blob>}
  */
 export async function synthesizeSpeech(text, options = {}) {
@@ -498,7 +501,7 @@ export async function synthesizeSpeech(text, options = {}) {
     if (!input) throw new Error('読み上げるテキストがありません。');
 
     if (settings.engine === 'network') {
-        return await synthesizeSpeechViaNetwork({ baseUrl: settings.baseUrl, model: settings.model, voice: settings.voice, text: input });
+        return await synthesizeSpeechViaNetwork({ baseUrl: settings.baseUrl, model: settings.model, voice: settings.voice, text: input, speed: options.speed, responseFormat: options.responseFormat });
     }
 
     if (settings.engine === 'api') {
@@ -508,7 +511,8 @@ export async function synthesizeSpeech(text, options = {}) {
             apiKey: settings.apiKey,
             model: settings.model,
             voice: settings.voice,
-            speed: settings.speed,
+            speed: options.speed ?? settings.speed,
+            responseFormat: options.responseFormat,
             text: input,
             signal: options.signal,
         });

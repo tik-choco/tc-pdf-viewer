@@ -735,18 +735,6 @@ button:not(:disabled):active {
   color: var(--text-main);
 }
 
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.85rem;
-  cursor: pointer;
-}
-
-.checkbox-label input[type='checkbox'] {
-  accent-color: var(--primary);
-}
-
 .chat-panel {
   width: var(--chat-width, 350px);
   background: var(--bg-sidebar);
