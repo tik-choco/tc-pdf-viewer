@@ -125,7 +125,7 @@ export function useTts() {
      * Plays one synthesized chunk, resolving when it finishes (or when the
      * utterance it belongs to has been superseded).
      */
-    const playBlob = useCallback((blob, speed, generation) => {
+    const playBlob = useCallback((blob, generation) => {
         return new Promise((resolve, reject) => {
             const url = URL.createObjectURL(blob);
             if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
@@ -133,7 +133,7 @@ export function useTts() {
 
             const audio = new Audio(url);
             audioRef.current = audio;
-            if (typeof speed === 'number' && Number.isFinite(speed)) audio.playbackRate = speed;
+            // Shared speed is already applied by HTTP/room synthesis. Play at the native rate.
             audio.onended = () => resolve();
             // stop() pauses the current chunk; resolving here lets the queue
             // loop wake up and bail out on its generation check instead of
@@ -243,7 +243,7 @@ export function useTts() {
                     }
 
                     try {
-                        await playBlob(blob, current.speed, generation);
+                        await playBlob(blob, generation);
                     } catch (err) {
                         if (generation !== generationRef.current) return;
                         console.warn('[useTts] playback failed.', err);
