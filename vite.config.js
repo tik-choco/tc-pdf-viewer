@@ -71,7 +71,8 @@ export default defineConfig(({ mode }) => {
       })
     ],
     optimizeDeps: {
-      include: ['pdfjs-dist']
+      include: ['pdfjs-dist'],
+      exclude: ['@tik-choco/mistlib', '@tik-choco/mistlib-web']
     }
   };
 });

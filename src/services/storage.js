@@ -1,4 +1,4 @@
-import { storage_add, storage_get } from '../lib/mistlib/index.js';
+import { storage_add, storage_get } from '@tik-choco/mistlib-web';
 import { getMistNode } from '../utils/mist.js';
 import { readDeviceId } from '../utils/device.js';
 import { publishShared } from './sharedBus.js';
@@ -410,7 +410,7 @@ export async function migrateMarkdownIndexesToCid() {
 // Chat transcripts can grow unbounded (many turns of full AI responses), so
 // like the OCR/translation indexes above, only a small CID pointer per PDF
 // lives in localStorage; the message array itself is content-addressed via
-// mistlib storage_add/storage_get. This vendored mistlib build doesn't
+// mistlib storage_add/storage_get. The @tik-choco/mistlib-web wrapper doesn't
 // expose the storage_kv_set/get KV API yet, so the pointer index reuses the
 // same storage_add/storage_get + small-index pattern as
 // mist_ocr_markdown_index above rather than adding a new mistlib import.

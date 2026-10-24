@@ -9,7 +9,7 @@
 // Sender pattern copied from tc-travel/src/lib/drive/export.ts; record
 // shapes and per-field {updatedAt, nodeId} LWW stamps mirror
 // tc-storage/src/storage/domain.ts + crdt.ts.
-import { storage_add, storage_get } from '../lib/mistlib/index.js';
+import { storage_add, storage_get } from '@tik-choco/mistlib-web';
 import { getMistNode } from '../utils/mist.js';
 import { readDeviceId } from '../utils/device.js';
 import { publishShared, readShared } from './sharedBus.js';

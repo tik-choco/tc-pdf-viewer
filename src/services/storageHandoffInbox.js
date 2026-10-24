@@ -31,7 +31,7 @@
 // protocol/docs/data-contracts/docs/SHARED_BUS.md.
 
 import { savePdf, initMist } from './storage.js';
-import { storage_get } from '../lib/mistlib/index.js';
+import { storage_get } from '@tik-choco/mistlib-web';
 import { sha256Hex } from './driveCrypto.js';
 
 export const inboxTopic = 'pdf-viewer-inbox';

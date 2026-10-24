@@ -1,5 +1,5 @@
 import { createRoomConsumers, createSharedNodeScope } from '@tik-choco/mistai';
-import { MistNode } from '../lib/mistlib/index.js';
+import { MistNode } from '@tik-choco/mistlib-web';
 import { captureMistBuildInfo, markMistLoadError } from '../lib/mistBuildInfo.js';
 import { readDeviceId } from '../utils/device.js';
 import { mistSignalingConfig } from './mistSignaling.js';
