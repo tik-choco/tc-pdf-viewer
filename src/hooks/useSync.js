@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { DELIVERY_RELIABLE, EVENT_RAW } from '@tik-choco/mistlib-web';
+import { DELIVERY_RELIABLE, EVENT_AOI_ENTERED, EVENT_AOI_LEFT, EVENT_NEIGHBORS, EVENT_RAW } from '@tik-choco/mistlib-web';
 import { readDeviceId } from '../utils/device.js';
 import { createSyncNode } from '../services/mistllm.js';
 
 const ROOM_QUERY_KEY = 'room';
 const ROOM_PREFIX = 'pdf-sync-';
 const BROADCAST_GRACE_MS = 500;
-const PRESENCE_EVENT_TYPES = new Set([2, 3, 4]);
+const PRESENCE_EVENT_TYPES = new Set([EVENT_NEIGHBORS, EVENT_AOI_ENTERED, EVENT_AOI_LEFT]);
 
 function readInitialRoomId() {
   const queryRoom = new URLSearchParams(window.location.search).get(ROOM_QUERY_KEY)?.trim();
@@ -278,7 +278,7 @@ export function useSync({
         if (PRESENCE_EVENT_TYPES.has(eventType)) {
           const count = readPeerCount(node, deviceId);
           setPeerCount(count);
-          if (eventType === 2) {
+          if (eventType === EVENT_NEIGHBORS) {
             sendCurrentSnapshot();
           }
         }
